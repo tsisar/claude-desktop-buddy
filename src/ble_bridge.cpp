@@ -40,10 +40,19 @@ static void rxPush(const uint8_t* p, size_t n) {
 }
 
 class RxCallbacks : public BLECharacteristicCallbacks {
+  // arduino-esp32 core 3.x changed onWrite to take the GATTS param and
+  // getValue() to return Arduino String; 2.x is onWrite(c) + std::string.
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  void onWrite(BLECharacteristic* c, esp_ble_gatts_cb_param_t*) override {
+    String v = c->getValue();
+    if (v.length()) rxPush((const uint8_t*)v.c_str(), v.length());
+  }
+#else
   void onWrite(BLECharacteristic* c) override {
     std::string v = c->getValue();
     if (!v.empty()) rxPush((const uint8_t*)v.data(), v.size());
   }
+#endif
 };
 
 class ServerCallbacks : public BLEServerCallbacks {
