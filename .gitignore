@@ -1,4 +1,7 @@
-.pio/
-.vscode/
 .DS_Store
+.pio/
+__pycache__/
+*.pyc
 data/
+.vscode/
+.idea/
