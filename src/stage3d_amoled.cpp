@@ -3,6 +3,7 @@
 // status + pairing passkey on screen, echo received bytes to serial. No JSON
 // parsing yet (that's stage 3e). Touch is ignored here.
 #include <Arduino.h>
+#include <esp_mac.h>   // esp_read_mac / ESP_MAC_BT (core 3.x)
 #include "board_pins.h"
 #include "hal/display.h"
 #include "ble_bridge.h"
