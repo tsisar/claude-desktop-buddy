@@ -1,27 +1,31 @@
-// Stage 2 — hardware bring-up for the Waveshare ESP32-S3-Touch-AMOLED-1.8.
+// Stage 2 — hardware bring-up / display diagnostic for the
+// Waveshare ESP32-S3-Touch-AMOLED-1.8.
 //
-// Not the buddy yet. This is the "does the board actually work" sketch:
-//   1. SH8601 AMOLED comes up, the PSRAM canvas flushes  -> "hello buddy"
-//   2. QMI8658 IMU answers on I2C                         -> live accel xyz
-//   3. FT3168 touch answers on I2C                        -> tap coords
-// Everything is also echoed to USB-CDC serial so you can verify headless.
+// Black screen debugging: this version isolates *where* the display path
+// breaks by testing two independent routes and logging status every second
+// (so you can read it any time, not just catch the boot banner):
 //
-// Build/flash (on a real machine — cannot be done from this environment):
-//   pio run -e ws-amoled-18 -t upload && pio device monitor
+//   A. DIRECT panel test  — panel()->fillScreen(R/G/B), bypassing the
+//      offscreen canvas. Proves the SH8601 glass + QSPI + brightness work.
+//   B. CANVAS test        — fillSprite()+pushSprite(), the path the real
+//      firmware uses. If A lights up but B is black, the canvas/flush is
+//      the problem; if both are black, it's panel power/init.
 //
-// Once this is confirmed on-device, stage 3 ports main.cpp onto the same HAL.
+// Build/flash:  pio run -e ws-amoled-18 -t upload && pio device monitor
 
 #include <Arduino.h>
 #include <Wire.h>
+#include <Arduino_GFX_Library.h>
 #include "board_pins.h"
 #include "hal/display.h"
 
 #include <SensorQMI8658.hpp>
+#include "hal/power.h"    // AXP2101 PMU: powers the AMOLED rail on this board
 
-// RGB565 colors (same encoding as TFT_eSPI).
+// RGB565 colors.
 static const uint16_t C_BG    = 0x0000;
 static const uint16_t C_TEXT  = 0xFFFF;
-static const uint16_t C_BODY  = 0x6B0D;  // olive-ish, bufo green vibe
+static const uint16_t C_BODY  = 0x6B0D;
 static const uint16_t C_DIM   = 0x8410;
 static const uint16_t C_OK    = 0x07E0;
 static const uint16_t C_HOT   = 0xFA20;
@@ -30,10 +34,9 @@ static Surface       gfx;
 static SensorQMI8658 imu;
 static bool          imuOk   = false;
 static bool          touchOk = false;
-static bool          dispOk  = false;   // gate all canvas draws on this
+static bool          dispOk  = false;
 
 // --- FT3168 touch: minimal direct read (FT6x36-class register layout) ----
-// Reg 0x02 = number of touch points; 0x03.. = point 0 (xh,xl,yh,yl).
 static bool ft3168Probe() {
   Wire.beginTransmission(TOUCH_ADDR);
   return Wire.endTransmission() == 0;
@@ -44,119 +47,113 @@ static bool ft3168Read(uint16_t& x, uint16_t& y) {
   Wire.write(0x02);
   if (Wire.endTransmission(false) != 0) return false;
   if (Wire.requestFrom((int)TOUCH_ADDR, 5) != 5) return false;
-  uint8_t n  = Wire.read();          // 0x02 touch count
-  uint8_t xh = Wire.read();          // 0x03
-  uint8_t xl = Wire.read();          // 0x04
-  uint8_t yh = Wire.read();          // 0x05
-  uint8_t yl = Wire.read();          // 0x06
+  uint8_t n  = Wire.read();
+  uint8_t xh = Wire.read();
+  uint8_t xl = Wire.read();
+  uint8_t yh = Wire.read();
+  uint8_t yl = Wire.read();
   if ((n & 0x0F) == 0) return false;
   x = ((uint16_t)(xh & 0x0F) << 8) | xl;
   y = ((uint16_t)(yh & 0x0F) << 8) | yl;
   return true;
 }
 
-static void banner() {
-  if (!dispOk) return;          // no canvas → don't touch it (would crash)
-  gfx.fillSprite(C_BG);
-
-  gfx.setTextDatum(MC_DATUM);
-  gfx.setTextSize(4);
-  gfx.setTextColor(C_BODY, C_BG);
-  gfx.drawString("hello buddy", LCD_WIDTH / 2, 110);
-
-  gfx.setTextSize(2);
-  gfx.setTextColor(C_TEXT, C_BG);
-  gfx.drawString("AMOLED 368x448", LCD_WIDTH / 2, 160);
-
-  gfx.setTextSize(1);
-  gfx.setTextColor(C_DIM, C_BG);
-  gfx.drawString("SH8601 + FT3168 + QMI8658", LCD_WIDTH / 2, 188);
-  gfx.setTextDatum(TL_DATUM);
-
-  // status lines (updated each loop in the lower area)
-  gfx.pushSprite();
+// Draw straight to the glass, no canvas in the path.
+static void directFill(uint16_t color) {
+  Arduino_SH8601* p = gfx.panel();
+  if (p) p->fillScreen(color);
 }
 
 void setup() {
   Serial.begin(115200);
-  delay(200);
-  Serial.println("\n[bringup] ESP32-S3-Touch-AMOLED-1.8");
+  Serial.setTxTimeoutMs(0);
+  delay(400);
+  Serial.println("\n[bringup] ESP32-S3-Touch-AMOLED-1.8 diag boot");
 
-  // Display first so failures of the rest are still visible on screen.
-  if (!gfx.begin()) {
-    Serial.println("[bringup] display begin() FAILED");
-  } else {
-    Serial.println("[bringup] display OK");
-  }
-  banner();
-
-  // One shared I2C bus for touch + IMU + RTC + PMU.
+  // Shared I2C up first, then PMU (powers the panel rail), THEN the display.
   Wire.begin(IIC_SDA, IIC_SCL, 400000);
+  powerInit(Wire);
+  powerDumpRails();
+  delay(50);   // let rails settle before the panel powers on
 
-  // QMI8658 IMU.
+  dispOk = gfx.begin();
+  Serial.printf("[bringup] display %s psram=%u free=%u heap=%u\n",
+                dispOk ? "OK" : "FAILED",
+                (unsigned)ESP.getPsramSize(), (unsigned)ESP.getFreePsram(),
+                (unsigned)ESP.getFreeHeap());
+
+  if (dispOk) {
+    // Route A — direct to panel. Force brightness up first in case the
+    // default is 0. If the glass works at all, you'll see R, G, B flashes.
+    gfx.setBrightness(255);
+    Serial.println("[bringup] direct panel: RED");   directFill(0xF800); delay(700);
+    Serial.println("[bringup] direct panel: GREEN"); directFill(0x07E0); delay(700);
+    Serial.println("[bringup] direct panel: BLUE");  directFill(0x001F); delay(700);
+
+    // Route B — through the canvas (what the firmware uses).
+    Serial.println("[bringup] canvas: fill+text");
+    gfx.fillSprite(C_BG);
+    gfx.setTextDatum(MC_DATUM);
+    gfx.setTextSize(4); gfx.setTextColor(C_BODY, C_BG);
+    gfx.drawString("hello buddy", LCD_WIDTH / 2, 180);
+    gfx.setTextSize(2); gfx.setTextColor(C_TEXT, C_BG);
+    gfx.drawString("canvas path", LCD_WIDTH / 2, 230);
+    gfx.setTextDatum(TL_DATUM);
+    gfx.pushSprite();
+  }
+
+  // (Wire already begun above, before powerInit.)
   imuOk = imu.begin(Wire, IMU_ADDR, IIC_SDA, IIC_SCL);
   if (imuOk) {
     imu.configAccelerometer(SensorQMI8658::ACC_RANGE_4G,
                             SensorQMI8658::ACC_ODR_1000Hz);
-    imu.configGyroscope(SensorQMI8658::GYR_RANGE_256DPS,
-                        SensorQMI8658::GYR_ODR_896_8Hz);
     imu.enableAccelerometer();
-    imu.enableGyroscope();
-    Serial.println("[bringup] QMI8658 OK");
-  } else {
-    Serial.println("[bringup] QMI8658 NOT found at 0x6B");
   }
+  Serial.printf("[bringup] QMI8658 %s\n", imuOk ? "OK" : "NOT found");
 
-  // FT3168 touch.
   touchOk = ft3168Probe();
   pinMode(TP_INT, INPUT);
   Serial.printf("[bringup] FT3168 %s at 0x38\n", touchOk ? "OK" : "NOT found");
+  Serial.println("[bringup] setup done");
 }
 
 void loop() {
-  static uint32_t lastLog = 0;
+  static uint32_t lastLog = 0, lastPaint = 0;
+  static uint8_t  phase = 0;
+
   float ax = 0, ay = 0, az = 0;
   if (imuOk && imu.getDataReady()) imu.getAccelerometer(ax, ay, az);
-
   uint16_t tx = 0, ty = 0;
   bool touched = touchOk && ft3168Read(tx, ty);
 
-  // Repaint the status band ~10 fps.
-  static uint32_t lastPaint = 0;
-  if (dispOk && millis() - lastPaint >= 100) {
+  // Alternate the two display paths every 1.5s so the screen itself tells
+  // us where the break is, no serial needed:
+  //   phases 0,1,2 = DIRECT panel fill  R, G, B   (bypasses canvas)
+  //   phases 3,4,5 = CANVAS fill        R, G, B   (the firmware's path)
+  // Whichever set lights up is the working route.
+  if (dispOk && millis() - lastPaint >= 1500) {
     lastPaint = millis();
-    gfx.fillRect(0, 230, LCD_WIDTH, LCD_HEIGHT - 230, C_BG);
-
-    int y = 244;
-    auto line = [&](uint16_t col, const char* fmt, ...) {
-      char b[64]; va_list a; va_start(a, fmt); vsnprintf(b, sizeof(b), fmt, a); va_end(a);
-      gfx.setTextColor(col, C_BG);
-      gfx.setTextSize(2);
-      gfx.setCursor(16, y);
-      gfx.print(b);
-      y += 26;
-    };
-
-    line(imuOk ? C_OK : C_HOT, "IMU  %s", imuOk ? "ok" : "--");
-    if (imuOk) line(C_DIM, " x%+.2f y%+.2f z%+.2f", ax, ay, az);
-    line(touchOk ? C_OK : C_HOT, "TOUCH %s", touchOk ? "ok" : "--");
-    if (touched) {
-      line(C_TEXT, " tap %u,%u", tx, ty);
-      // little crosshair where you touched
-      gfx.drawCircle(tx, ty, 12, C_HOT);
-      gfx.drawFastHLine(tx - 18, ty, 36, C_HOT);
-      gfx.drawFastVLine(tx, ty - 18, 36, C_HOT);
+    const uint16_t rgb[] = { 0xF800, 0x07E0, 0x001F };  // R G B
+    uint8_t p = phase % 6;
+    if (p < 3) {
+      directFill(rgb[p]);                 // route A: straight to glass
+      Serial.printf("[bringup] DIRECT panel %c\n", "RGB"[p]);
     } else {
-      line(C_DIM, " (touch the screen)");
+      gfx.fillSprite(rgb[p - 3]);          // route B: canvas -> flush
+      gfx.setTextDatum(TL_DATUM);
+      gfx.setTextSize(3); gfx.setTextColor(0xFFFF, rgb[p - 3]);
+      gfx.setCursor(12, 12); gfx.print("CANVAS");
+      gfx.pushSprite();
+      Serial.printf("[bringup] CANVAS %c\n", "RGB"[p - 3]);
     }
-    gfx.pushSprite();
+    phase++;
   }
 
   if (millis() - lastLog >= 1000) {
     lastLog = millis();
-    Serial.printf("[bringup] imu=%d a(%.2f,%.2f,%.2f) touch=%d (%u,%u)\n",
+    Serial.printf("[bringup] disp=%d psram=%u heap=%u | imu=%d a(%.2f,%.2f,%.2f) | touch=%d (%u,%u)\n",
+                  dispOk, (unsigned)ESP.getPsramSize(), (unsigned)ESP.getFreeHeap(),
                   imuOk, ax, ay, az, touched, tx, ty);
   }
-
   delay(16);
 }

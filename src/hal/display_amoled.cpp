@@ -16,15 +16,26 @@ bool Surface::begin() {
   // SH8601, no reset GPIO (GFX_NOT_DEFINED), rotation 0, 368x448.
   _pnl = new Arduino_SH8601(bus, GFX_NOT_DEFINED, 0, LCD_WIDTH, LCD_HEIGHT);
 
-  // Canvas allocates LCD_WIDTH*LCD_HEIGHT*2 bytes (~322KB) — must land in
-  // PSRAM, which Arduino_Canvas does when BOARD_HAS_PSRAM is set.
+  // Initialise the panel EXPLICITLY first, exactly like Waveshare's
+  // 01_HelloWorld (Arduino_SH8601 + gfx->begin()). Relying on
+  // Arduino_Canvas::begin() to do this left the glass dark on both the
+  // direct and canvas paths — the panel's display-on/init burst wasn't
+  // running. Begin it ourselves, push it on, set brightness.
+  if (!_pnl->begin()) {
+    return false;
+  }
+  _pnl->fillScreen(0x0000);
+  _pnl->setBrightness(255);
+
+  // Offscreen canvas: LCD_WIDTH*LCD_HEIGHT*2 bytes (~322KB) in PSRAM
+  // (BOARD_HAS_PSRAM). The panel is already begun, so this is just the
+  // framebuffer the firmware draws into and flush()es to the live panel.
   _cv = new Arduino_Canvas(LCD_WIDTH, LCD_HEIGHT, _pnl);
-  if (!_cv->begin()) {            // inits the panel and allocates the buffer
+  if (!_cv->begin()) {
     return false;
   }
   _cv->fillScreen(0x0000);
   _cv->flush();
-  _pnl->setBrightness(255);
   return true;
 }
 

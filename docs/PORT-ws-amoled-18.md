@@ -16,16 +16,16 @@ Source of truth for pins: the official Waveshare engineering-sample repo
 `examples/Arduino-v3.3.5/libraries/Mylibrary/pin_config.h`. (An early forum
 hit listed CS=9/CLK=10 — that is **wrong** for this board; ignore it.)
 
-| Block | Part | Bus | Pins / address |
-| --- | --- | --- | --- |
-| Display | SH8601, 368×448, 16.7M color | QSPI | CS=12, SCLK=11, D0=4, D1=5, D2=6, D3=7; RST not wired (`GFX_NOT_DEFINED`), no EN toggle — just `gfx->begin()` |
-| Touch | FT3168 (FT6x36-class) | I²C | SDA=15, SCL=14, INT=21, addr `0x38` |
-| IMU | QMI8658 (6-axis) | I²C | shared SDA=15/SCL=14, addr `0x6B` |
-| RTC | PCF85063 | I²C | shared bus, addr `0x51` |
-| PMU | AXP2101 (charge/battery) | I²C | shared bus, addr `0x34` (`XPOWERS_CHIP_AXP2101`) |
-| Audio | ES8311 codec + speaker | I²S | MCLK=16, BCLK=9, WS=45, DO=8, DI=10, PA_EN=46 |
-| microSD | SDMMC 1-bit | — | CLK=2, CMD=1, DAT=3 |
-| Buttons | PWR (via AXP2101 IRQ), BOOT (GPIO0) | — | no A/B buttons — UI must move to **touch** |
+| Block   | Part                                | Bus  | Pins / address                                                                                                |
+|---------|-------------------------------------|------|---------------------------------------------------------------------------------------------------------------|
+| Display | SH8601, 368×448, 16.7M color        | QSPI | CS=12, SCLK=11, D0=4, D1=5, D2=6, D3=7; RST not wired (`GFX_NOT_DEFINED`), no EN toggle — just `gfx->begin()` |
+| Touch   | FT3168 (FT6x36-class)               | I²C  | SDA=15, SCL=14, INT=21, addr `0x38`                                                                           |
+| IMU     | QMI8658 (6-axis)                    | I²C  | shared SDA=15/SCL=14, addr `0x6B`                                                                             |
+| RTC     | PCF85063                            | I²C  | shared bus, addr `0x51`                                                                                       |
+| PMU     | AXP2101 (charge/battery)            | I²C  | shared bus, addr `0x34` (`XPOWERS_CHIP_AXP2101`)                                                              |
+| Audio   | ES8311 codec + speaker              | I²S  | MCLK=16, BCLK=9, WS=45, DO=8, DI=10, PA_EN=46                                                                 |
+| microSD | SDMMC 1-bit                         | —    | CLK=2, CMD=1, DAT=3                                                                                           |
+| Buttons | PWR (via AXP2101 IRQ), BOOT (GPIO0) | —    | no A/B buttons — UI must move to **touch**                                                                    |
 
 Confirmed straight from `pin_config.h`: LCD_SDIO0..3 = 4/5/6/7, LCD_SCLK=11,
 LCD_CS=12, LCD_WIDTH=368, LCD_HEIGHT=448, IIC_SDA=15, IIC_SCL=14, TP_INT=21.
@@ -42,16 +42,16 @@ The 368×448×16bpp full-screen canvas is ~322KB — lives in PSRAM, not in the
 
 ## Library mapping
 
-| Concern | M5 (old) | AMOLED (new) |
-| --- | --- | --- |
-| Display + offscreen canvas | `M5StickCPlus` / `TFT_eSprite` | `GFX Library for Arduino` (moononournation): `Arduino_ESP32QSPI` + `Arduino_SH8601` + `Arduino_Canvas` |
-| GIF decode | `bitbank2/AnimatedGIF` | same |
-| JSON | `bblanchon/ArduinoJson` | same |
-| IMU | `M5.Imu` (MPU6886) | `lewisxhe/SensorLib` → `SensorQMI8658` |
-| PMU / battery | `M5.Axp` (AXP192) | `lewisxhe/XPowersLib` → `XPowersAXP2101` |
-| RTC | `M5.Rtc` | `SensorLib` `SensorPCF85063` (or AXP2101) |
-| Touch | — | FT3168 over I²C (direct, or `Arduino_DriveBus` FT3x68) |
-| Buzzer | `M5.Beep` (passive buzzer) | no buzzer — board has an **ES8311 codec + speaker** instead; `beep()` starts as a no-op, optional later: short I²S tone via the codec |
+| Concern                    | M5 (old)                       | AMOLED (new)                                                                                                                          |
+|----------------------------|--------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| Display + offscreen canvas | `M5StickCPlus` / `TFT_eSprite` | `GFX Library for Arduino` (moononournation): `Arduino_ESP32QSPI` + `Arduino_SH8601` + `Arduino_Canvas`                                |
+| GIF decode                 | `bitbank2/AnimatedGIF`         | same                                                                                                                                  |
+| JSON                       | `bblanchon/ArduinoJson`        | same                                                                                                                                  |
+| IMU                        | `M5.Imu` (MPU6886)             | `lewisxhe/SensorLib` → `SensorQMI8658`                                                                                                |
+| PMU / battery              | `M5.Axp` (AXP192)              | `lewisxhe/XPowersLib` → `XPowersAXP2101`                                                                                              |
+| RTC                        | `M5.Rtc`                       | `SensorLib` `SensorPCF85063` (or AXP2101)                                                                                             |
+| Touch                      | —                              | FT3168 over I²C (direct, or `Arduino_DriveBus` FT3x68)                                                                                |
+| Buzzer                     | `M5.Beep` (passive buzzer)     | no buzzer — board has an **ES8311 codec + speaker** instead; `beep()` starts as a no-op, optional later: short I²S tone via the codec |
 
 Official Waveshare Arduino examples themselves use Arduino_GFX
 (`Arduino_ESP32QSPI` + `Arduino_SH8601` + `Arduino_Canvas`) and ship an LVGL

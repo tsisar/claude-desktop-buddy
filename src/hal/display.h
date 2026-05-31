@@ -87,6 +87,10 @@ public:
   // Raw canvas for the GIF decoder's per-pixel draw callback.
   Arduino_Canvas* raw() { return _cv; }
 
+  // The SH8601 panel itself, for bring-up diagnostics that need to draw
+  // straight to the glass (bypassing the offscreen canvas).
+  Arduino_SH8601* panel() { return _pnl; }
+
 private:
   Arduino_Canvas* _cv  = nullptr;
   Arduino_SH8601* _pnl = nullptr;
