@@ -20,7 +20,11 @@
 #include "hal/display.h"
 
 #include <SensorQMI8658.hpp>
-#include "hal/power.h"    // AXP2101 PMU: powers the AMOLED rail on this board
+// NOTE: no AXP2101 power-init here. On this board the PMU already powers the
+// AMOLED rails at reset (rail dump showed ALDO1/ALDO3/BLDO1/BLDO2 all ON),
+// and adding powerInit() before the display only turned the screen black.
+// The display works with just gfx.begin(), exactly like Waveshare's
+// 01_HelloWorld. Kept out of the bring-up path on purpose.
 
 // RGB565 colors.
 static const uint16_t C_BG    = 0x0000;
@@ -70,12 +74,8 @@ void setup() {
   delay(400);
   Serial.println("\n[bringup] ESP32-S3-Touch-AMOLED-1.8 diag boot");
 
-  // Shared I2C up first, then PMU (powers the panel rail), THEN the display.
-  Wire.begin(IIC_SDA, IIC_SCL, 400000);
-  powerInit(Wire);
-  powerDumpRails();
-  delay(50);   // let rails settle before the panel powers on
-
+  // Display first (no PMU touching). This is the exact ordering that showed
+  // colours on hardware.
   dispOk = gfx.begin();
   Serial.printf("[bringup] display %s psram=%u free=%u heap=%u\n",
                 dispOk ? "OK" : "FAILED",
@@ -102,7 +102,8 @@ void setup() {
     gfx.pushSprite();
   }
 
-  // (Wire already begun above, before powerInit.)
+  // Shared I2C for touch + IMU (after the display, like the working build).
+  Wire.begin(IIC_SDA, IIC_SCL, 400000);
   imuOk = imu.begin(Wire, IMU_ADDR, IIC_SDA, IIC_SCL);
   if (imuOk) {
     imu.configAccelerometer(SensorQMI8658::ACC_RANGE_4G,
