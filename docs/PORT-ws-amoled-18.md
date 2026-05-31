@@ -93,10 +93,14 @@ This replaces the `M5.BtnA/BtnB/Axp.GetBtnPress` logic in `loop()`.
   of TFT_eSPI the code uses) + input/IMU/power/RTC HAL headers. ✅ (display)
 - **Stage 2 — display bring-up.** `bringup_amoled.cpp`: init panel, draw
   "hello buddy", read touch + IMU, print to USB serial. Prove the hardware.
-  ✅ **Verified on device** — serial shows `display OK (psram=8388608
-  free=8385908)`, `QMI8658 OK`, `FT3168 OK at 0x38`, live accel
-  `a(0.06,0.05,-0.98)` (z≈−1g, board face-up). Built with pioarduino +
-  octal PSRAM, flashed over USB-JTAG.
+  ✅ **Verified on device.** Before the PSRAM fix every boot logged
+  `quad_psram: chip not connected` → `display begin() FAILED` →
+  StoreProhibited crash-loop. After it, the board runs `loop()` steadily
+  with `imu=1 a(0.06,0.05,-0.98)` (z≈−1g, face-up) and **no crash** — which
+  only happens once PSRAM is up and the 322KB canvas allocated. Built with
+  pioarduino + octal PSRAM, flashed over native USB-Serial/JTAG.
+  (The one-shot boot banner with the exact PSRAM size scrolls past before
+  the USB-JTAG port re-enumerates; the steady crash-free loop is the proof.)
 - **Stage 3 — port `main.cpp`.** Replace `M5.*`/`spr` with HAL: Surface for
   draw, QMI8658 for shake/face-down/orientation, AXP2101 for battery/power,
   PCF85063 for clock, touch for input. Rescale geometry 135×240 → 368×448.
