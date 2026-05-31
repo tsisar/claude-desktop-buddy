@@ -21,6 +21,7 @@
 #include "ble_bridge.h"
 #include "buddy.h"
 #include "buddy_common.h"
+#include "hal/audio.h"
 
 static Surface gfx;
 static bool dispOk = false, touchOk = false;
@@ -172,6 +173,7 @@ void setup() {
   Wire.begin(IIC_SDA, IIC_SCL, 400000);
   Wire.beginTransmission(TOUCH_ADDR); touchOk = (Wire.endTransmission()==0);
   pinMode(TP_INT, INPUT);
+  audioInit(Wire);   // ES8311 beep on the speaker (scaffold; unverified)
 
   uint8_t mac[6]={0}; esp_read_mac(mac, ESP_MAC_BT);
   char name[16]; snprintf(name, sizeof(name), "Claude-%02X%02X", mac[4], mac[5]);
@@ -187,6 +189,15 @@ void loop() {
   pollBle();
 
   bool prompt = tama.promptId[0] != 0;
+  // Chirp once when a NEW approval prompt arrives (id changed).
+  static char lastBeepedId[40] = "";
+  if (prompt && strcmp(tama.promptId, lastBeepedId) != 0) {
+    strncpy(lastBeepedId, tama.promptId, sizeof(lastBeepedId)-1);
+    lastBeepedId[sizeof(lastBeepedId)-1] = 0;
+    audioBeep(1200, 120);   // alert chirp
+  }
+  if (!prompt) lastBeepedId[0] = 0;
+
   uint16_t tx, ty;
   bool down = touchOk && touchPt(tx, ty);
   if (down && !latch) {
