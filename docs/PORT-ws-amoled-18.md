@@ -92,7 +92,10 @@ This replaces the `M5.BtnA/BtnB/Axp.GetBtnPress` logic in `loop()`.
 - **Stage 1 — HAL boundary.** `src/hal/display.h` (Surface API == the subset
   of TFT_eSPI the code uses) + input/IMU/power/RTC HAL headers. ✅ (display)
 - **Stage 2 — display bring-up.** `bringup_amoled.cpp`: init panel, draw
-  "hello buddy", read touch + IMU, print to USB serial. Prove the hardware. ✅
+  "hello buddy", read touch + IMU, print to USB serial. Prove the hardware.
+  ✅ **Verified on device** — serial shows `display OK (psram=8388608)`,
+  `QMI8658 OK`, `FT3168 OK at 0x38`, live accel `a(0.05,-0.02,1.00)`
+  (z≈1g flat). Built with pioarduino + octal PSRAM, flashed over USB-JTAG.
 - **Stage 3 — port `main.cpp`.** Replace `M5.*`/`spr` with HAL: Surface for
   draw, QMI8658 for shake/face-down/orientation, AXP2101 for battery/power,
   PCF85063 for clock, touch for input. Rescale geometry 135×240 → 368×448.
@@ -115,6 +118,19 @@ This replaces the `M5.BtnA/BtnB/Axp.GetBtnPress` logic in `loop()`.
 - No buzzer: `beep()` is a no-op; optional tone later via ES8311 codec.
 - Touch/IMU/RTC/PMU all share **one** I²C bus (SDA=15, SCL=14). Init it once
   and hand the same `Wire` to every driver.
+- **Toolchain:** the stock PlatformIO `espressif32` platform ships
+  arduino-esp32 **2.0.x**, which lacks `esp32-hal-periman.h` that
+  Arduino_GFX 1.4.x needs → build fails. Use the **pioarduino** platform
+  (core 3.x) instead — see the `platform = …pioarduino…` line in
+  `platformio.ini`.
+- **Octal PSRAM:** the board is ESP32-S3R8 with *octal* PSRAM, but
+  `esp32-s3-devkitc-1` defaults to *quad* (`qio_qspi`). Without
+  `board_build.arduino.memory_type = qio_opi` the boot log shows
+  `quad_psram: chip not connected` and the 322KB canvas alloc fails →
+  `display begin() FAILED` → crash. With it: `psram=8388608` and all good.
+- **USB is native USB-Serial/JTAG** (not an external UART). `Serial` needs
+  `-DARDUINO_USB_CDC_ON_BOOT=1` (set) to appear on the port, and
+  `Serial.setTxTimeoutMs(0)` so prints don't block when no monitor is open.
 - Partition: start with `default_16MB.csv`; a custom no-OTA layout gives more
   LittleFS room for GIF character packs if needed.
 - Cannot build/flash from this environment — all new code is **pending

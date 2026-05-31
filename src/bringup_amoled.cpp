@@ -30,6 +30,7 @@ static Surface       gfx;
 static SensorQMI8658 imu;
 static bool          imuOk   = false;
 static bool          touchOk = false;
+static bool          dispOk  = false;   // gate all canvas draws on this
 
 // --- FT3168 touch: minimal direct read (FT6x36-class register layout) ----
 // Reg 0x02 = number of touch points; 0x03.. = point 0 (xh,xl,yh,yl).
@@ -55,6 +56,7 @@ static bool ft3168Read(uint16_t& x, uint16_t& y) {
 }
 
 static void banner() {
+  if (!dispOk) return;          // no canvas → don't touch it (would crash)
   gfx.fillSprite(C_BG);
 
   gfx.setTextDatum(MC_DATUM);
@@ -121,7 +123,7 @@ void loop() {
 
   // Repaint the status band ~10 fps.
   static uint32_t lastPaint = 0;
-  if (millis() - lastPaint >= 100) {
+  if (dispOk && millis() - lastPaint >= 100) {
     lastPaint = millis();
     gfx.fillRect(0, 230, LCD_WIDTH, LCD_HEIGHT - 230, C_BG);
 
