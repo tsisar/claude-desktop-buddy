@@ -46,15 +46,18 @@ static const int BUDDY_CHAR_H   = 8;
 static const uint8_t SCALE = 4;              // glyph 24x32 at size 4
 
 // ── Surface-backed buddy_common helpers (mirror src/buddy.cpp) ──
+// The art is a FIXED 12-char grid; the spaces ARE the composition (ears,
+// tail offsets). So center the whole grid as one block and print every line
+// from the same left edge — do NOT trim per-line, that desyncs the rows and
+// makes the buddy "drift". (M5 trimmed only because 12 glyphs didn't fit its
+// 135px screen at 2x; at 368px the 288px grid fits with margin.)
+static const int BUDDY_COLS = 12;
 static void buddyPrintLine(const char* line, int yPx, uint16_t color, int xOff = 0) {
-  int len = strlen(line);
-  while (len && line[len-1] == ' ') len--;          // trim for centering at scale
-  while (len && *line == ' ') { line++; len--; }
-  int w = len * BUDDY_CHAR_W * SCALE;
-  int x = BUDDY_X_CENTER - w / 2 + xOff * SCALE;
+  int gridW = BUDDY_COLS * BUDDY_CHAR_W * SCALE;        // 288px
+  int x = BUDDY_X_CENTER - gridW / 2 + xOff * SCALE;
   gfx.setTextColor(color, BUDDY_BG);
   gfx.setCursor(x, yPx);
-  for (int i = 0; i < len; i++) gfx.print(line[i]);
+  gfx.print(line);                                      // full line incl. spaces
 }
 static void buddyPrintSprite(const char* const* lines, uint8_t n, int yOffset,
                              uint16_t color, int xOff = 0) {
