@@ -28,6 +28,7 @@
 #include <Preferences.h>
 #include <esp_mac.h>
 #include <string.h>
+#include <math.h>
 #include "board_pins.h"
 #include "hal/display.h"
 #include "hal/power.h"
@@ -148,6 +149,17 @@ static bool      responseSent  = false;
 static uint8_t   msgScroll     = 0;
 static uint16_t  lastLineGen   = 0;
 
+// ── auto-behaviours (3i.5) ─────────────────────────────────────────────────
+static uint32_t lastInteractMs    = 0;   // any input or prompt arrival
+static uint32_t wakeTransitionMs  = 0;   // until: hold SLEEP after waking
+static uint32_t lastShakeCheckMs  = 0;   // throttle IMU read to ~50 Hz
+static float    accelBaseline     = 1.0f; // EMA for shake delta
+static int8_t   faceDownFrames    = 0;   // debounce: enter +15, exit -8
+static bool     napping           = false;
+static uint32_t napStartMs        = 0;
+static uint32_t lastPasskey       = 0;
+static const uint32_t SCREEN_OFF_MS = 30000;
+
 static uint8_t derive(const TamaState& s) {
   if (!s.connected)           return P_IDLE;
   if (s.sessionsWaiting > 0)  return P_ATTENTION;
@@ -159,6 +171,23 @@ static uint8_t derive(const TamaState& s) {
 static void triggerOneShot(uint8_t s, uint32_t durMs) {
   activeState = s;
   oneShotUntil = millis() + durMs;
+}
+
+// Forward — applyBrightness() body lives down with the settings code, but
+// wake()/IMU/auto-screen-off paths up here need to be able to call it.
+static void applyBrightness();
+
+// Mark the device as interacted-with: arms the 30s auto-screen-off timer
+// and, if the panel was dark, brings it back. A 12-second SLEEP-hold is
+// armed so the wake-up animation gets visible airtime before normal state
+// dispatch takes over.
+static void wake() {
+  lastInteractMs = millis();
+  if (!screenOn) {
+    screenOn = true;
+    applyBrightness();
+    wakeTransitionMs = millis() + 12000;
+  }
 }
 
 static void beep(uint16_t freq, uint16_t ms) {
@@ -672,6 +701,30 @@ static void drawPet() {
   }
 }
 
+// ── passkey pairing screen (3i.5) ──────────────────────────────────────────
+//
+// NimBLE prompts the host for a 6-digit code. blePasskey() returns it as a
+// uint32_t for the duration of the pairing exchange and 0 otherwise. While
+// non-zero we replace the entire view so the user can't miss the digits.
+static void drawPasskey() {
+  gfx.fillSprite(0x0000);
+  gfx.setTextDatum(MC_DATUM);
+
+  gfx.setTextSize(3);
+  gfx.setTextColor(0x07FF, 0x0000);
+  gfx.drawString("BLUETOOTH PAIRING", W / 2, 100);
+
+  gfx.setTextSize(8);
+  gfx.setTextColor(0xFFFF, 0x0000);
+  char b[8]; snprintf(b, sizeof(b), "%06lu", (unsigned long)blePasskey());
+  gfx.drawString(b, W / 2, H / 2);
+
+  gfx.setTextSize(2);
+  gfx.setTextColor(0xC618, 0x0000);
+  gfx.drawString("enter on desktop", W / 2, H - 100);
+  gfx.setTextDatum(TL_DATUM);
+}
+
 // ── modal helpers (3i.3) ───────────────────────────────────────────────────
 //
 // Modal panel: centered, 300 px wide, height grows with item count. Title
@@ -1153,6 +1206,7 @@ void setup() {
   settingsLoad();
   petNameLoad();
   applyBrightness();
+  lastInteractMs = millis();   // arm the auto-screen-off countdown from boot
 
   uint8_t mac[6] = {0}; esp_read_mac(mac, ESP_MAC_BT);
   snprintf(btName, sizeof(btName), "Claude-%02X%02X", mac[4], mac[5]);
@@ -1181,16 +1235,96 @@ void loop() {
     if (tama.promptId[0]) {
       promptArrivedMs = now;
       beep(1200, 80);
-      Serial.printf("[3i.3] PROMPT %s  tool=%s\n", tama.promptId, tama.promptTool);
+      wake();   // new prompt is itself an interaction event
+      Serial.printf("[3i.5] PROMPT %s  tool=%s\n", tama.promptId, tama.promptTool);
     }
   }
+
+  // Hold P_SLEEP for 12s after waking so the wake-up animation has time to
+  // play. Urgent states (ATTENTION / CELEBRATE / BUSY) still override via
+  // the derive() result above.
+  if (activeState == P_IDLE && (int32_t)(now - wakeTransitionMs) < 0) {
+    activeState = P_SLEEP;
+  }
+
+  // ── IMU polling: shake → DIZZY, face-down → nap (3i.5) ──
+  if (now - lastShakeCheckMs > 50) {
+    lastShakeCheckMs = now;
+    float ax = 0, ay = 0, az = 0;
+    if (imuGetAccel(&ax, &ay, &az)) {
+      // Shake: only fire on home, screen lit, no modal, no oneShot running.
+      // Same delta+EMA detector as the M5 build (delta > 0.8g).
+      bool shakeEligible = (uiState == UI_NORMAL) && screenOn && !napping
+                        && (int32_t)(now - oneShotUntil) >= 0;
+      float mag = sqrtf(ax*ax + ay*ay + az*az);
+      float delta = fabsf(mag - accelBaseline);
+      accelBaseline = accelBaseline * 0.95f + mag * 0.05f;
+      if (shakeEligible && delta > 0.8f) {
+        triggerOneShot(P_DIZZY, 2000);
+        wake();
+      }
+
+      // Face-down nap: az < -0.7g with the other axes calm. Debounced
+      // 15-frame enter / 8-frame exit so a brief toss doesn't trigger.
+      // Skipped during prompt — user is reading it, not napping the device.
+      bool inPromptNow = tama.promptId[0] && !responseSent;
+      if (!inPromptNow) {
+        bool down = (az < -0.7f) && fabsf(ax) < 0.4f && fabsf(ay) < 0.4f;
+        if (down) { if (faceDownFrames < 20) faceDownFrames++; }
+        else      { if (faceDownFrames > -10) faceDownFrames--; }
+        if (!napping && faceDownFrames >= 15) {
+          napping = true;
+          napStartMs = now;
+          screenOn = false;
+          applyBrightness();
+          Serial.println("[3i.5] nap start");
+        } else if (napping && faceDownFrames <= -8) {
+          napping = false;
+          uint32_t napS = (now - napStartMs) / 1000;
+          statsOnNapEnd(napS);
+          statsOnWake();
+          wake();
+          Serial.printf("[3i.5] nap end (%lus)\n", (unsigned long)napS);
+        }
+      }
+    }
+  }
+
+  // ── auto screen-off after idle (3i.5) ──
+  // Only when on battery — on USB the clock face wants to stay visible.
+  // Skipped during prompt (the user is mid-decision).
+  bool inPromptNow = tama.promptId[0] && !responseSent;
+  if (screenOn && !napping && !inPromptNow && !onUsb()
+      && (now - lastInteractMs > SCREEN_OFF_MS)) {
+    screenOn = false;
+    applyBrightness();
+    Serial.println("[3i.5] auto screen-off");
+  }
+
+  // ── BLE passkey arrival: wake and beep (3i.5) ──
+  uint32_t pk = blePasskey();
+  if (pk && !lastPasskey) {
+    wake();
+    beep(1800, 60);
+    Serial.printf("[3i.5] passkey %06lu\n", (unsigned long)pk);
+  }
+  lastPasskey = pk;
 
   // ── physical buttons (parallel to touch) ──
   BootEvent be = pollBoot();
   PwronEvent pw = powerPollButton();
   if (pw != PWRON_NONE || be != BOOT_NONE) {
-    Serial.printf("[3i.4] btn  BOOT=%d PWRON=%d  ui=%d disp=%d\n",
+    Serial.printf("[3i.5] btn  BOOT=%d PWRON=%d  ui=%d disp=%d\n",
                   (int)be, (int)pw, (int)uiState, (int)displayMode);
+    // Any physical press counts as interaction — wake the screen and arm
+    // the 30s timeout. PWRON-short's own screen-toggle path still gets to
+    // flip screenOn afterwards (toggle wins; wake() doesn't force-on).
+    lastInteractMs = now;
+    if (!screenOn && pw != PWRON_SHORT) {
+      // Skip auto-wake when PWRON_SHORT is the event — that case is
+      // handled below where the user might be intending screen-off.
+      wake();
+    }
   }
 
   if (uiState != UI_NORMAL) {
@@ -1228,8 +1362,9 @@ void loop() {
   bool inPrompt = tama.promptId[0] && !responseSent;
 
   if (ev.kind != GESTURE_NONE) {
-    Serial.printf("[3i.3] gesture %u at (%u,%u) d(%d,%d) state=%d\n",
+    Serial.printf("[3i.5] gesture %u at (%u,%u) d(%d,%d) state=%d\n",
                   (unsigned)ev.kind, ev.x, ev.y, ev.dx, ev.dy, uiState);
+    wake();   // any gesture counts as interaction
     if (uiState != UI_NORMAL) {
       handleModalGesture(ev);
     } else if (inPrompt) {
@@ -1280,7 +1415,10 @@ void loop() {
                && tama.sessionsRunning == 0 && tama.sessionsWaiting == 0
                && dataRtcValid() && onUsb();
 
+  // Passkey takes priority over everything except an actual approval
+  // prompt — the user has 30s to type the code into the desktop.
   if      (inPrompt || responseSent) drawApproval();
+  else if (blePasskey())             drawPasskey();
   else if (clocking)                 drawClock();
   else if (displayMode == DISP_PET)  drawPet();
   else if (displayMode == DISP_INFO) drawInfo(btName);
