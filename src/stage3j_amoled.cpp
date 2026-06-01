@@ -1299,6 +1299,11 @@ static void mockDeny() {
 
 // ── setup / loop ───────────────────────────────────────────────────────────
 void setup() {
+  // Bump the USB-CDC RX buffer before begin(). Default ~256B overruns on
+  // long xfer chunk lines (~270B base64 + JSON envelope) — the second
+  // chunk silently disappears and the device looks dead. 4KB gives ~15
+  // chunks of headroom for the worst-case burst.
+  Serial.setRxBufferSize(4096);
   Serial.begin(115200); Serial.setTxTimeoutMs(0); delay(300);
   Serial.println("\n[3i.3] UI shell + menu stack");
 

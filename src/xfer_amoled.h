@@ -228,13 +228,36 @@ inline bool xferCommand(JsonDocument& doc) {
 
   if (strcmp(cmd, "chunk") == 0) {
     const char* b64 = doc["d"];
-    if (!b64 || !_xFile) { _xAck("chunk", false); return true; }
+    if (!b64 || !_xFile) {
+      Serial.printf("[xfer] chunk: missing %s\n", b64 ? "file" : "data");
+      _xAck("chunk", false);
+      return true;
+    }
     uint8_t buf[300];
     size_t outLen = 0;
+    size_t b64Len = strlen(b64);
     int rc = mbedtls_base64_decode(buf, sizeof(buf), &outLen,
-                                   (const uint8_t*)b64, strlen(b64));
-    if (rc != 0) { _xAck("chunk", false); return true; }
-    _xFile.write(buf, outLen);
+                                   (const uint8_t*)b64, b64Len);
+    if (rc != 0) {
+      Serial.printf("[xfer] chunk: base64 fail rc=%d in=%u out=%u\n",
+                    rc, (unsigned)b64Len, (unsigned)outLen);
+      _xAck("chunk", false);
+      return true;
+    }
+    size_t wrote = _xFile.write(buf, outLen);
+    // yield() lets FreeRTOS task scheduler run — LittleFS flash erase can
+    // block for hundreds of ms, and without yielding the IDLE task never
+    // gets to reset the task WDT. WDT-panic was the suspected cause of
+    // the second-chunk hang during the bufo test push.
+    yield();
+    if (wrote != outLen) {
+      Serial.printf("[xfer] chunk: write short wrote=%u expected=%u "
+                    "free=%llu\n",
+                    (unsigned)wrote, (unsigned)outLen,
+                    (unsigned long long)(storageTotalBytes() - storageUsedBytes()));
+      _xAck("chunk", false, _xWritten);
+      return true;
+    }
     _xWritten += outLen;
     _xTotalWritten += outLen;
     // Ack every chunk: filesystem writes can block on flash erase, and
