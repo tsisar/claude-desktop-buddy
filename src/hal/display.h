@@ -109,4 +109,9 @@ private:
   // 6x8 base glyph cell, like TFT_eSPI font 1.
   static constexpr int GLYPH_W = 6;
   static constexpr int GLYPH_H = 8;
+  // Built-in GFX fonts anchor text at the cursor's TOP-LEFT; u8g2 fonts
+  // anchor at the BASELINE. Every call site here was written for top-left,
+  // so when a u8g2 font is active we push the cursor down by the font's
+  // cap-ascent to keep that contract (0 = built-in font, no shift).
+  int16_t  _u8g2Ascent = 0;
 };
