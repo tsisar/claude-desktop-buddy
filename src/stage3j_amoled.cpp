@@ -216,10 +216,7 @@ static void wake() {
 }
 
 static void beep(uint16_t freq, uint16_t ms) {
-  // settings().sound gate now reconnected — Settings menu can mute. Audio
-  // is currently silent on hardware regardless (see .tmp/backlog.md), but
-  // wiring it through here means the moment the codec issue is fixed, the
-  // toggle does the right thing without code change.
+  // TEMP: back to the original square-wave tone to test basic audibility.
   if (!settings().sound) return;
   audioBeep(freq, ms);
 }
@@ -414,7 +411,7 @@ static void drawHome() {
     buddyTick(activeState);   // ASCII species path
   }
   if (settings().hud) drawHUD();   // "transcript" setting gates the HUD
-  drawBatteryWidget(W - 12 - 14 - SAFE, 14 + SAFE);   // top-right, alongside the buddy
+  drawBatteryWidget(W - 14 - 14 - SAFE, 14 + SAFE);   // top-right, alongside the buddy
 }
 
 // ── approval screen (3i.2) ─────────────────────────────────────────────────
@@ -430,7 +427,7 @@ static void drawApproval() {
   } else {
     buddyTick(P_ATTENTION);
   }
-  drawBatteryWidget(W - 12 - 14 - SAFE, 14 + SAFE);   // top-right, same as home
+  drawBatteryWidget(W - 14 - 14 - SAFE, 14 + SAFE);   // top-right, same as home
 
   // ── approval card (bottom third) ──
   const int cardTop = 296;
@@ -520,7 +517,7 @@ static void drawBatteryWidget(int bx, int by) {
   int pct = batteryPercent();
   bool chg = charging();
 
-  const int bw = 12, bh = 28;       // body
+  const int bw = 14, bh = 28;       // body
   const int tipW = 6, tipH = 3;     // little nub on top
 
   gfx.fillRect(bx + (bw - tipW) / 2, by, tipW, tipH, 0xC618);
@@ -578,7 +575,7 @@ static void drawClock() {
   gfx.drawString(dl, W / 2, H / 2 + 110);
   gfx.setTextDatum(TL_DATUM);
 
-  drawBatteryWidget(W - 12 - 14 - SAFE, 14 + SAFE);   // top-right
+  drawBatteryWidget(W - 14 - 14 - SAFE, 14 + SAFE);   // top-right
 }
 
 // Header strip shared by PET / INFO pages: title left, page counter right.
