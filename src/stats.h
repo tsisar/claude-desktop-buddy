@@ -63,7 +63,12 @@ inline void statsSave() {
 // Level is token-driven now; approvals only feed mood/velocity.
 inline void statsOnApproval(uint32_t secondsToRespond) {
   _stats.approvals++;
-  _stats.velocity[_stats.velIdx] = (uint16_t)min(secondsToRespond, 65535u);
+  // Cap at uint16_t max. Plain `min()` is a macro in arduino-esp32 2.x
+  // (M5 build) but resolves to typed std::min() in core 3.x (AMOLED port);
+  // a ternary avoids the template deduction conflict in the newer core.
+  _stats.velocity[_stats.velIdx] = (secondsToRespond > 65535u)
+                                     ? (uint16_t)65535
+                                     : (uint16_t)secondsToRespond;
   _stats.velIdx = (_stats.velIdx + 1) % 8;
   if (_stats.velCount < 8) _stats.velCount++;
   _dirty = true; statsSave();
