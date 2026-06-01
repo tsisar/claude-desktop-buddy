@@ -10,6 +10,12 @@
 static XPowersPMU pmu;
 static bool       ok = false;
 
+// Battery charge current. AXP2101 defaults are NOT safe to assume, so we set
+// this explicitly. Rule of thumb: ~0.5C of the cell's capacity. 150mA suits a
+// small (~300mAh) buddy LiPo and is safe-but-slow for anything larger — bump
+// to _300MA / _500MA once the installed cell's capacity is confirmed.
+static constexpr uint8_t CHARGE_CURRENT = XPOWERS_AXP2101_CHG_CUR_150MA;
+
 bool powerInit(TwoWire& w) {
   ok = pmu.begin(w, AXP2101_SLAVE_ADDRESS, IIC_SDA, IIC_SCL);
   if (!ok) {
@@ -36,9 +42,32 @@ bool powerInit(TwoWire& w) {
   expanderResetPulse();
 
   // Battery fuel-gauge + ADC channels, so the telemetry getters below work.
+  pmu.enableBattDetection();              // PMU must know a cell is present...
   pmu.enableBattVoltageMeasure();
   pmu.enableVbusVoltageMeasure();
   pmu.enableSystemVoltageMeasure();
+
+  // Charger configuration. Without this the AXP2101 runs on whatever its
+  // registers happened to hold, which is how a "100%" cell could drain flat
+  // on a 30-min trip and then refuse to boot from battery alone (deep
+  // discharge → only VBUS can re-trigger power-on).
+  pmu.setChargeTargetVoltage(XPOWERS_AXP2101_CHG_VOL_4V2);   // 4.2V cut-off
+  pmu.setPrechargeCurr(XPOWERS_AXP2101_PRECHARGE_50MA);
+  pmu.setChargerConstantCurr(CHARGE_CURRENT);
+  pmu.setChargerTerminationCurr(XPOWERS_AXP2101_CHG_ITERM_25MA);
+  // Cap how much we pull from the USB port so a weak source stays stable.
+  pmu.setVbusCurrentLimit(XPOWERS_AXP2101_VBUS_CUR_LIM_500MA);
+
+  // Under-voltage protection. If the rail sags this low the PMU pulls the
+  // plug rather than browning out the ESP32 mid-write.
+  pmu.setSysPowerDownVoltage(2600);
+  pmu.setLowBatWarnThreshold(15);         // %, fires the low-batt IRQ
+  pmu.setLowBatShutdownThreshold(5);      // %, PMU auto-shuts down here
+
+  // Enable the coulomb-counter fuel gauge. THIS is what makes
+  // getBatteryPercent() report the real charge — without it the gauge
+  // register holds its power-on default (100), so every cell reads full.
+  pmu.fuelGaugeControl(true, true);
 
   // PWRON IRQ — short / long press latched in the chip's status reg so the
   // main loop can poll powerPollButton() at any rate without losing events.
