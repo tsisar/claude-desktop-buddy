@@ -137,20 +137,62 @@ This replaces the `M5.BtnA/BtnB/Axp.GetBtnPress` logic in `loop()`.
   - **3h — touch + gesture verification.** ✅ `src/stage3h_amoled.cpp` +
     `src/gesture.cpp`: tap / swipe up/down/left/right recognition on top
     of the touch HAL. Verified end-to-end on hardware.
-  - **3i (next) — fold HAL into a unified `main.cpp` port.** Bring in
-    `data.h` (transcript + owner + petname + RTC sync), `stats.h`
-    (mood/fed/energy/level + NVS), settings (sound/bt/wifi/led/clockRot
-    + NVS), and the full UI surface: HUD with transcript scrollback,
-    approval screen, INFO/PET pages, menus, reset modal, clock face.
-    Geometry rescaled 135×240 → 368×448. Input via gestures from 3h.
-- **Stage 4 — species + GIF.** Species files draw via Surface (drop
-  `#include <M5StickCPlus.h>`, `extern Surface spr`). Re-center the 18 ASCII
-  pets (3a/3b/3c laid the groundwork) and the GIF canvas for the larger
-  screen; bump GIF target size; port `character.cpp` + `xfer.h`.
-- **Stage 5 — BLE + xfer.** `ble_bridge`/`data`/`xfer` are already
-  hardware-agnostic (only `M5.Axp` reads in `xfer.h` status need swapping for
-  AXP2101). NimBLE wire path already proven in 3f. Wire protocol and
-  `characters/` packs are unchanged.
+  - **3i — fold HAL into a unified UI port** in `src/stage3j_amoled.cpp`.
+    Built up in five verified sub-stages:
+    - **3i.1 — backend.** ✅ `src/data_amoled.h` + `src/stats.h`. Full
+      heartbeat parser, RTC sync via `hal/rtc.h`, transcript / owner /
+      petname through NVS. `stats.h` (mood / fed / energy / level + NVS)
+      stays mostly the M5 version with one std::min cast fix for
+      arduino-esp32 core 3.x.
+    - **3i.2 — UI shell.** ✅ Home (CAT-only buddy + transcript HUD) +
+      full approval screen + tap-to-scroll HUD. Approve / Deny on swipe
+      left / right. UTF-8 → '?' strip (later replaced by a real font in
+      the cyrillic font commit).
+    - **3i.3 — menu + settings + reset modal.** ✅ Modal stack: main /
+      settings / reset / confirm. Touch (tap row) AND physical buttons
+      (BOOT short = cursor up, PWRON short = cursor down, BOOT long =
+      select) share the same `navIdx`. Reset confirm replaces M5's
+      tap-twice arm pattern. NVS persists every settings toggle.
+    - **3i.4 — INFO + PET + clock face + DISP cycling.** ✅
+      DISP_NORMAL / PET / INFO cycled with swipe-down. 2 PET pages
+      (stats / how-to), 6 INFO pages (ABOUT / CONTROLS / CLAUDE /
+      DEVICE / BLUETOOTH / CREDITS). Clock face takes over the home
+      view when parked on USB + RTC synced + no live work.
+    - **3i.5 — auto-behaviours.** ✅ Shake → DIZZY one-shot (QMI8658
+      magnitude delta), face-down nap with stats accumulation, 30s
+      auto screen-off on battery, 12s SLEEP-hold after waking, full-
+      screen passkey display during BLE pairing.
+- **Stage 4 — species + GIF custom characters.** Built up in four
+  sub-stages, fully wired by 4d (end-to-end push verification still
+  pending Claude Desktop):
+  - **4a — species registry + cycling.** ✅ `src/buddy_amoled.cpp`
+    replaces M5's `buddy.cpp` without the TFT_eSprite / M5 dependency.
+    All 18 species cycle through Settings → "ascii pet"; NVS persists
+    the choice.
+  - **4b — hybrid storage HAL.** ✅ `src/hal/storage.h` +
+    `storage_amoled.cpp`. SDMMC (1-bit) first, LittleFS fallback,
+    STORAGE_NONE if both fail. Callers get a single `fs::FS&` so the
+    xfer path stays backend-agnostic.
+  - **4c — xfer.h folder-push transport.** Compiles. `src/xfer_amoled.h`
+    speaks the same wire protocol as Claude Desktop (cmd:char_begin /
+    file / chunk / file_end / char_end) plus housekeeping cmd:status /
+    name / owner / species / unpair. `tools/usb_xfer_send.{py,sh}`
+    pushes a folder over USB-CDC for local verification.
+  - **4d — character.cpp GIF playback.** Compiles. `src/character_amoled.cpp`
+    reads `/characters/<name>/manifest.json`, opens GIFs through
+    AnimatedGIF, renders scanlines through `Surface::drawPixel`. xfer's
+    `char_end` triggers `characterInit(name)` so a fresh push becomes the
+    active buddy immediately. Tri-state Settings → "ascii pet" cycles
+    ASCII 0..N-1 → GIF (when installed) → 0.
+- **Cyrillic font.** ✅ `src/fonts/u8g2_font_6x12_t_cyrillic.{cpp,h}` —
+  191-glyph public-domain u8g2 font with full RU+UA coverage. The data
+  path keeps UTF-8 verbatim; `Surface::setUTF8Print(true)` and
+  `setFont(u8g2_font_6x12_t_cyrillic)` in `setup()` make `Привіт` render
+  as actual Cyrillic instead of `?`. Build flag `-DU8G2_FONT_SUPPORT`
+  unlocks the u8g2 path inside Arduino_GFX.
+- **Stage 5 — final BLE/xfer integration.** End-to-end folder push +
+  GIF render verification with Claude Desktop on macOS/Windows. Code
+  side is done; this is purely the on-hw confirmation.
 - **Stage 6 (optional) — LVGL** touch-native UI shell.
 
 ## Notes / gotchas
