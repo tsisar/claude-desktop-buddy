@@ -411,42 +411,70 @@ static void drawHome() {
 static void drawApproval() {
   gfx.fillSprite(0x0000);
 
+  // Keep the buddy alive during a prompt: animate it in ATTENTION (the
+  // pulsing "!" mood) up top, exactly like the home view, then lay the
+  // approval details over a card along the bottom.
+  if (gifAvailable && !buddyMode && characterLoaded()) {
+    characterSetState(P_ATTENTION);
+    characterTick();
+  } else {
+    buddyTick(P_ATTENTION);
+  }
+  drawBatteryWidget(W - 12 - 14, 14);   // top-right, same as home
+
+  // ── approval card (bottom third) ──
+  const int cardTop = 296;
+  gfx.fillRect(0, cardTop, W, H - cardTop, 0x0000);   // mask any buddy bleed
+  gfx.drawFastHLine(0, cardTop, W, 0x4208);
+
+  // Timer line.
   uint32_t waited = (millis() - promptArrivedMs) / 1000;
   gfx.setTextDatum(TC_DATUM);
-  gfx.setTextSize(3);
+  gfx.setTextSize(2);
   gfx.setTextColor(waited >= 10 ? 0xFA20 : 0xC618, 0x0000);
   char top[24]; snprintf(top, sizeof(top), "approve?  %lus", (unsigned long)waited);
-  gfx.drawString(top, W / 2, 30);
+  gfx.drawString(top, W / 2, cardTop + 8);
 
-  size_t toolLen = strlen(tama.promptTool);
+  // Tool name — largest size whose pixel width fits, truncated with '~' if
+  // even the smallest won't (avoids the off-screen wrap that garbled it).
+  const int maxW = W - 20;
+  int toolSize = 3;
+  while (toolSize > 2 && (int)strlen(tama.promptTool) * 6 * toolSize > maxW)
+    toolSize--;
+  char toolBuf[40];
+  int maxChars = maxW / (6 * toolSize);
+  if ((int)strlen(tama.promptTool) > maxChars && maxChars >= 2) {
+    int keep = maxChars - 1;
+    memcpy(toolBuf, tama.promptTool, keep);
+    toolBuf[keep] = '~';
+    toolBuf[keep + 1] = 0;
+  } else {
+    snprintf(toolBuf, sizeof(toolBuf), "%s", tama.promptTool);
+  }
   gfx.setTextColor(0xFFFF, 0x0000);
-  gfx.setTextSize(toolLen <= 12 ? 5 : (toolLen <= 18 ? 4 : 3));
-  gfx.drawString(tama.promptTool, W / 2, 100);
+  gfx.setTextSize(toolSize);
+  gfx.drawString(toolBuf, W / 2, cardTop + 30);
   gfx.setTextDatum(TL_DATUM);
 
+  // Hint — up to 2 lines, wrapped to the width that actually fits.
   gfx.setTextSize(2);
   gfx.setTextColor(0xC618, 0x0000);
   static char hintLines[6][48];
-  uint8_t hn = wrapInto(tama.promptHint, hintLines, 6, HUD_WIDTH);
-  for (uint8_t i = 0; i < hn; i++) {
-    gfx.setCursor(20, 200 + i * 22);
+  const int hintCols = (W - 20) / (6 * 2);
+  uint8_t hn = wrapInto(tama.promptHint, hintLines, 6, hintCols);
+  for (uint8_t i = 0; i < hn && i < 2; i++) {
+    gfx.setCursor(10, cardTop + 60 + i * 18);
     gfx.print(hintLines[i]);
   }
 
-  gfx.drawFastHLine(0, H - 80, W, 0x4208);
-  gfx.setTextSize(3);
+  // No DENY/APPROVE labels — swipe right approves, left denies. After a
+  // decision, just confirm it was sent.
   if (responseSent) {
+    gfx.setTextSize(3);
     gfx.setTextDatum(TC_DATUM);
     gfx.setTextColor(0x8410, 0x0000);
-    gfx.drawString("sent...", W / 2, H - 60);
+    gfx.drawString("sent...", W / 2, H - 36);
     gfx.setTextDatum(TL_DATUM);
-  } else {
-    gfx.setTextColor(0xFA20, 0x0000);
-    gfx.setCursor(20, H - 60); gfx.print("< DENY");
-    gfx.setTextColor(0x07E0, 0x0000);
-    const char* right = "APPROVE >";
-    int rw = strlen(right) * 6 * 3;
-    gfx.setCursor(W - rw - 20, H - 60); gfx.print(right);
   }
 }
 
