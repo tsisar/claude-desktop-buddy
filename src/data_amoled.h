@@ -78,10 +78,10 @@ inline const char* dataScenarioName() {
 static bool _rtcValid = false;
 inline bool dataRtcValid() { return _rtcValid; }
 
-// Stub for the GIF folder-push transport. Stage 4 will replace with the
-// real xfer.h handler. Until then any {"cmd":"..."} JSON not handled here
-// is silently ignored at the caller — keeps the heartbeat path clean.
-static inline bool _xferCommandStub(JsonDocument&) { return false; }
+// Forward to the real xfer.h handler defined in xfer_amoled.h (Stage 4c).
+// Declared as a free function so the linker pairs the call site here with
+// the inline definition in the single .cpp that includes xfer_amoled.h.
+bool xferCommand(JsonDocument& doc);
 
 // Copy a possibly-UTF-8 string into an ASCII-only buffer for the 6×8
 // hardware font. Printable ASCII passes through; control bytes are
@@ -107,7 +107,7 @@ static void _asciiCopy(char* dst, size_t dstLen, const char* src) {
 static void _applyJson(const char* line, TamaState* out) {
   JsonDocument doc;
   if (deserializeJson(doc, line)) return;
-  if (_xferCommandStub(doc)) { _lastLiveMs = millis(); return; }
+  if (xferCommand(doc)) { _lastLiveMs = millis(); return; }
 
   // Bridge sends {"time":[epoch_sec, tz_offset_sec]}; gmtime_r on the
   // adjusted epoch yields local components including weekday.

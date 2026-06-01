@@ -43,6 +43,17 @@
 #include "buddy_common.h"
 #include "gesture.h"
 
+// Character renderer is stubbed until Stage 4d. xfer_amoled.h needs
+// characterClose() / characterInit() callable, so they live here as
+// no-ops for now. gifAvailable + buddyMode globals are also referenced
+// from xfer (extern declarations there).
+bool buddyMode    = true;    // ASCII species mode by default
+bool gifAvailable = false;   // becomes true after characterInit() succeeds
+void characterClose() {}
+bool characterInit(const char*) { return false; }
+
+#include "xfer_amoled.h"   // defines xferCommand(), used by data_amoled.h
+
 static Surface gfx;
 static bool dispOk = false;
 static const int W = LCD_WIDTH, H = LCD_HEIGHT;
@@ -289,6 +300,42 @@ static void drawHUD() {
 }
 
 static void drawBatteryWidget(int bx, int by);   // body lives further down
+
+// Install progress card: shown over the buddy while xfer.h is mid-transfer.
+// Replaces the buddy view so the user knows they should leave the desktop
+// alone. Kilobyte counts + a bar; updates every render tick (5 fps).
+static void drawXferProgress() {
+  gfx.fillSprite(0x0000);
+  uint32_t done  = xferProgress();
+  uint32_t total = xferTotal();
+
+  gfx.setTextDatum(TC_DATUM);
+  gfx.setTextSize(4);
+  gfx.setTextColor(0xFFE0, 0x0000);
+  gfx.drawString("installing", W / 2, H / 2 - 90);
+
+  gfx.setTextSize(3);
+  gfx.setTextColor(0xFFFF, 0x0000);
+  char b[24];
+  if (total > 0) snprintf(b, sizeof(b), "%luK / %luK", done / 1024, total / 1024);
+  else           snprintf(b, sizeof(b), "%luK", done / 1024);
+  gfx.drawString(b, W / 2, H / 2 - 30);
+  gfx.setTextDatum(TL_DATUM);
+
+  // Progress bar
+  const int bx = 40, by = H / 2 + 20, bw = W - 80, bh = 30;
+  gfx.drawRoundRect(bx, by, bw, bh, 6, 0x8410);
+  if (total > 0 && done > 0) {
+    int fillW = (int)((uint64_t)(bw - 4) * done / total);
+    if (fillW > 1) gfx.fillRoundRect(bx + 2, by + 2, fillW, bh - 4, 4, 0x07E0);
+  }
+
+  gfx.setTextSize(2);
+  gfx.setTextColor(0xC618, 0x0000);
+  gfx.setTextDatum(TC_DATUM);
+  gfx.drawString("don't unplug", W / 2, H - 70);
+  gfx.setTextDatum(TL_DATUM);
+}
 
 static void drawHome() {
   gfx.fillSprite(0x0000);
@@ -1078,8 +1125,9 @@ static void doConfirm(int decision) {
     return;
   }
   if (confirmAction == CONF_FACTORY_RESET) {
-    // NVS namespace wipe + BLE bonds clear. LittleFS format will join when
-    // /characters/ comes online in Stage 4.
+    // NVS namespace wipe + BLE bonds + character pack. Restart so all
+    // state reloads from defaults.
+    xferDeleteAll();
     Preferences p;
     p.begin("buddy", false);
     p.clear();
@@ -1088,7 +1136,10 @@ static void doConfirm(int decision) {
     delay(300);
     ESP.restart();   // does not return
   }
-  // CONF_DELETE_CHAR — no-op until LittleFS lands. Acknowledge by closing.
+  if (confirmAction == CONF_DELETE_CHAR) {
+    xferDeleteAll();
+    Serial.println("[3i.3] character wiped");
+  }
   enterState(UI_NORMAL);
   confirmAction = CONF_NONE;
 }
@@ -1479,6 +1530,7 @@ void loop() {
   // prompt — the user has 30s to type the code into the desktop.
   if      (inPrompt || responseSent) drawApproval();
   else if (blePasskey())             drawPasskey();
+  else if (xferActive())             drawXferProgress();
   else if (clocking)                 drawClock();
   else if (displayMode == DISP_PET)  drawPet();
   else if (displayMode == DISP_INFO) drawInfo(btName);
