@@ -52,9 +52,10 @@ Everything that used to be M5's A/B buttons is touch-based now.
 | **swipe left**           | home (no prompt)| Previous pet / character                                           |
 | **swipe left**           | PET / INFO      | Next page                                                          |
 | **swipe right**          | PET / INFO      | Previous page                                                      |
-| **swipe up**             | home            | Open the menu                                                      |
+| **BOOT long-press**      | home            | Open the menu                                                      |
 | **swipe up**             | any modal       | Close everything back to home                                      |
-| **swipe down**           | home            | Cycle display mode: NORMAL → PET → INFO → NORMAL                   |
+| **swipe down**           | home            | Next view: NORMAL → PET → INFO → NORMAL                            |
+| **swipe up**             | home            | Previous view: NORMAL → INFO → PET → NORMAL                        |
 | **swipe down**           | any modal       | Step back one level                                                |
 | **tap on row**           | menu / settings / reset | Activate that row                                          |
 | **tap outside panel**    | menu / settings / reset | Close current modal                                        |
@@ -100,7 +101,7 @@ their own without you touching anything:
 
 ## Menus
 
-**Swipe up** (or BOOT long on home) opens the main menu.
+**BOOT long-press** on home opens the main menu. **Swipe up** inside any menu closes it back to home.
 
 | Main menu     | What it does                                              |
 |---------------|-----------------------------------------------------------|

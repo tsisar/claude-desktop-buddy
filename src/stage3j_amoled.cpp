@@ -3,14 +3,15 @@
 // What's wired:
 //   • Home (CAT species + transcript HUD)  ← 3i.2
 //   • Approval screen with swipe APPROVE / DENY  ← 3i.2
-//   • Main menu (swipe up to open)  ← 3i.3
+//   • Main menu (BOOT long to open)  ← 3i.3
 //   • Settings sub-menu — tap a row toggles / cycles the value
 //   • Reset sub-menu — tap an item opens a confirm modal (replaces M5's
 //     tap-twice arm/fire pattern)
 //   • Confirm modal — two buttons (Cancel / Confirm), tap outside cancels
 //
 // Modal stack rules:
-//   • swipe up from home    → open main menu
+//   • BOOT long from home   → open main menu
+//   • swipe up in a modal   → close the menu
 //   • tap a menu row        → execute (apply setting, open sub, etc.)
 //   • swipe down anywhere   → step back one level (CONFIRM → RESET →
 //                              SETTINGS → MAIN → HOME)
@@ -348,7 +349,7 @@ static void drawHome() {
   } else {
     buddyTick(activeState);   // ASCII species path
   }
-  drawHUD();
+  if (settings().hud) drawHUD();   // "transcript" setting gates the HUD
   drawBatteryWidget(W - 12 - 14, 14);   // top-right, alongside the buddy
 }
 
@@ -636,12 +637,12 @@ static void drawInfoButtons() {
   k(0xFFFF, "swipe <",       "deny");
   k(0xFFFF, "swipe </>",     "change pet");
   k(0xFFFF, "tap HUD",       "scroll log");
-  k(0xFFFF, "swipe v",       "cycle mode");
-  k(0xFFFF, "swipe ^",       "open menu");
+  k(0xFFFF, "swipe v",       "next view");
+  k(0xFFFF, "swipe ^",       "prev view");
   y += 10;
   k(0xFFE0, "BOOT tap",      "cursor up");
   k(0xFFE0, "PWR tap",       "cursor dn");
-  k(0xFFE0, "BOOT hold",     "select");
+  k(0xFFE0, "BOOT hold",     "menu/select");
   k(0xFFE0, "PWR hold",      "power off");
 }
 
@@ -933,9 +934,12 @@ static void applyMainMenu(int idx) {
       powerSetDisplay(false);
       enterState(UI_NORMAL);
       break;
-    case 2:   // help
-    case 3:   // about
-      // INFO pages land in 3i.4 — stub: just close the menu for now.
+    case 2:   // help → CONTROLS info page
+      displayMode = DISP_INFO; infoPage = 1;
+      enterState(UI_NORMAL);
+      break;
+    case 3:   // about → ABOUT info page
+      displayMode = DISP_INFO; infoPage = 0;
       enterState(UI_NORMAL);
       break;
     case 4:   // demo
@@ -949,8 +953,7 @@ static void applyMainMenu(int idx) {
 
 // ── settings menu (3i.3) ───────────────────────────────────────────────────
 static const char* const SETTINGS_ITEMS[] = {
-  "brightness", "sound", "bluetooth", "wifi", "led",
-  "transcript", "clock rot", "ascii pet", "reset", "back",
+  "brightness", "sound", "transcript", "ascii pet", "reset", "back",
 };
 static const int SETTINGS_N = sizeof(SETTINGS_ITEMS) / sizeof(SETTINGS_ITEMS[0]);
 // brightLevel itself is declared near the top of the file (drawInfoDevice
@@ -967,7 +970,6 @@ static void applyBrightness() {
 static void drawSettingsMenu() {
   drawModal("SETTINGS", SETTINGS_N, 0xFFE0);
   Settings& s = settings();
-  static const char* const ROT_NAMES[3] = { "auto", "port", "land" };
   for (int i = 0; i < SETTINGS_N; i++) {
     const char* value = nullptr;
     char buf[16];
@@ -976,12 +978,8 @@ static void drawSettingsMenu() {
     switch (i) {
       case 0: snprintf(buf, sizeof(buf), "%u/4", brightLevel);   value = buf; break;
       case 1: boolish = true; boolval = s.sound; break;
-      case 2: boolish = true; boolval = s.bt;    break;
-      case 3: boolish = true; boolval = s.wifi;  break;
-      case 4: boolish = true; boolval = s.led;   break;
-      case 5: boolish = true; boolval = s.hud;   break;
-      case 6: value = ROT_NAMES[s.clockRot < 3 ? s.clockRot : 0]; break;
-      case 7: {
+      case 2: boolish = true; boolval = s.hud;   break;
+      case 3: {
         // tri-state cycle: ASCII species 0..N-1 → GIF (if installed) → 0
         uint8_t total = buddySpeciesCount() + (gifAvailable ? 1 : 0);
         uint8_t pos   = buddyMode ? buddySpeciesIdx() + 1 : total;
@@ -1025,19 +1023,15 @@ static void applySettings(int idx) {
   switch (idx) {
     case 0: brightLevel = (brightLevel + 1) % 5; applyBrightness(); return;
     case 1: s.sound = !s.sound; break;
-    case 2: s.bt    = !s.bt;    break;
-    case 3: s.wifi  = !s.wifi;  break;
-    case 4: s.led   = !s.led;   break;
-    case 5: s.hud   = !s.hud;   break;
-    case 6: s.clockRot = (s.clockRot + 1) % 3; break;
-    case 7:
+    case 2: s.hud   = !s.hud;   break;
+    case 3:
       // tri-state cycle: ASCII species 0..N-1 → GIF (if installed) → 0
       cycleSpecies(+1);
       return;
-    case 8:   // reset → open reset sub-menu
+    case 4:   // reset → open reset sub-menu
       enterState(UI_MENU_RESET);
       return;
-    case 9:   // back → main
+    case 5:   // back → main
       enterState(UI_MENU_MAIN);
       return;
   }
@@ -1499,7 +1493,7 @@ void loop() {
     else if (pw == PWRON_SHORT) { navDown(); beep(1800, 20); }
     // PWRON_LONG falls through — AXP2101 owns it (hardware power-off).
   } else {
-    // No modal up. BOOT long always opens the menu (parity with swipe-up).
+    // No modal up. BOOT long is the only way to open the menu.
     if (be == BOOT_LONG) { enterState(UI_MENU_MAIN); beep(800, 60); }
 
     if (displayMode == DISP_NORMAL) {
@@ -1537,10 +1531,12 @@ void loop() {
       if      (ev.kind == GESTURE_SWIPE_RIGHT) mockApprove();
       else if (ev.kind == GESTURE_SWIPE_LEFT)  mockDeny();
     } else if (displayMode == DISP_NORMAL) {
-      if      (ev.kind == GESTURE_SWIPE_UP) {
-        enterState(UI_MENU_MAIN); beep(800, 60);
-      } else if (ev.kind == GESTURE_SWIPE_DOWN) {
+      // Up/down cycle the home views (down = forward, up = back). Menu now
+      // opens on BOOT long only.
+      if      (ev.kind == GESTURE_SWIPE_DOWN) {
         displayMode = DISP_PET; petPage = 0; beep(1800, 30);
+      } else if (ev.kind == GESTURE_SWIPE_UP) {
+        displayMode = DISP_INFO; infoPage = 0; beep(1800, 30);
       } else if (ev.kind == GESTURE_SWIPE_RIGHT) {
         // Home: swipe through characters. Right = next, left = previous.
         cycleSpecies(+1); beep(1800, 30);
@@ -1551,10 +1547,10 @@ void loop() {
         beep(1800, 30);
       }
     } else if (displayMode == DISP_PET) {
-      if      (ev.kind == GESTURE_SWIPE_UP) {
-        enterState(UI_MENU_MAIN); beep(800, 60);
-      } else if (ev.kind == GESTURE_SWIPE_DOWN) {
+      if      (ev.kind == GESTURE_SWIPE_DOWN) {
         displayMode = DISP_INFO; infoPage = 0; beep(1800, 30);
+      } else if (ev.kind == GESTURE_SWIPE_UP) {
+        displayMode = DISP_NORMAL; beep(1800, 30);
       } else if (ev.kind == GESTURE_SWIPE_LEFT) {
         // Book convention: drag finger right-to-left to reveal next page.
         petPage = (petPage + 1) % PET_PAGES; beep(1800, 30);
@@ -1562,10 +1558,10 @@ void loop() {
         petPage = (petPage + PET_PAGES - 1) % PET_PAGES; beep(1800, 30);
       }
     } else if (displayMode == DISP_INFO) {
-      if      (ev.kind == GESTURE_SWIPE_UP) {
-        enterState(UI_MENU_MAIN); beep(800, 60);
-      } else if (ev.kind == GESTURE_SWIPE_DOWN) {
+      if      (ev.kind == GESTURE_SWIPE_DOWN) {
         displayMode = DISP_NORMAL; beep(1800, 30);
+      } else if (ev.kind == GESTURE_SWIPE_UP) {
+        displayMode = DISP_PET; petPage = 0; beep(1800, 30);
       } else if (ev.kind == GESTURE_SWIPE_LEFT) {
         infoPage = (infoPage + 1) % INFO_PAGES; beep(1800, 30);
       } else if (ev.kind == GESTURE_SWIPE_RIGHT) {
