@@ -14,7 +14,17 @@
 # PATH `pio` if that location ever changes.
 PIO  ?= $(firstword $(wildcard $(HOME)/.platformio/penv/bin/pio) pio)
 ENV  ?= ws-amoled-18
-PORT ?= /dev/cu.usbmodem11401
+
+# Serial device default depends on OS:
+#   macOS → /dev/cu.usbmodem*   (the *call-up* node, what pio expects)
+#   Linux → /dev/ttyACM0        (ESP32-S3 USB-CDC enumerates as ACM)
+# Override with `make flash PORT=...` for a non-default device.
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+  PORT ?= /dev/cu.usbmodem11401
+else
+  PORT ?= /dev/ttyACM0
+endif
 BAUD ?= 115200
 
 .DEFAULT_GOAL := build

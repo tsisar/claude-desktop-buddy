@@ -50,8 +50,9 @@ The 368×448×16bpp full-screen canvas is ~322KB — lives in PSRAM, not in the
 | IMU                        | `M5.Imu` (MPU6886)             | `lewisxhe/SensorLib` → `SensorQMI8658`                                                                                                |
 | PMU / battery              | `M5.Axp` (AXP192)              | `lewisxhe/XPowersLib` → `XPowersAXP2101`                                                                                              |
 | RTC                        | `M5.Rtc`                       | `SensorLib` `SensorPCF85063` (or AXP2101)                                                                                             |
-| Touch                      | —                              | FT3168 over I²C (direct, or `Arduino_DriveBus` FT3x68)                                                                                |
-| Buzzer                     | `M5.Beep` (passive buzzer)     | no buzzer — board has an **ES8311 codec + speaker** instead; `beep()` starts as a no-op, optional later: short I²S tone via the codec |
+| Touch                      | —                              | Direct FT3168 driver in `src/hal/touch_amoled.cpp` (5-byte register read at 0x02). Gesture layer on top in `src/gesture.cpp` (tap / swipe) |
+| GPIO expander              | —                              | XCA9554 at I²C `0x20` — pulses RESET on touch/display/etc at boot via `src/hal/expander_amoled.cpp` (called from `powerInit`)         |
+| Buzzer                     | `M5.Beep` (passive buzzer)     | No buzzer — board uses **ES8311 codec + speaker**. `src/hal/audio_amoled.cpp` + `src/audio/es8311.cpp` provide a blocking `audioBeep(freq, ms)`; verified on hardware |
 
 Official Waveshare Arduino examples themselves use Arduino_GFX
 (`Arduino_ESP32QSPI` + `Arduino_SH8601` + `Arduino_Canvas`) and ship an LVGL
@@ -75,13 +76,32 @@ is wanted; the canvas stays as the pet/GIF surface.
 
 The M5 build maps everything to BtnA (next screen / approve), BtnB (page /
 deny), hold-A (menu), AXP power button (screen off). On AMOLED there are no
-such buttons, so input moves to the touchscreen:
+A/B buttons, so input moves to touch gestures + the PWRON button. Full
+mapping in `.tmp/buttons-map.md`; summary here:
 
-- **Approval screen:** large on-screen **Approve** / **Deny** tap targets.
-- **Navigation:** tap-zones (left/right thirds = prev/next screen), a
-  hamburger/long-press-equivalent (top-corner tap) opens the menu.
-- **Menus:** tap a row to select, tap again / dedicated button to confirm.
-- BOOT (GPIO0) kept as an emergency "wake / back" hardware button.
+- **Approval screen:** **swipe left = APPROVE**, **swipe right = DENY**
+  (no on-screen buttons — the whole canvas is the target).
+- **Menu (settings / reset / main):** **swipe up** opens; tap row =
+  select+confirm in one (no cycle); tap outside / `back` button = close.
+- **Cycle display mode** (NORMAL ↔ PET ↔ INFO): **swipe down**.
+- **INFO / PET pagination**: swipe left / right.
+- **Reset confirmation**: modal dialog with `Confirm` / `Cancel` (replaces
+  the M5 tap-twice arm/fire).
+- **Transcript scroll-back**: tap the HUD zone → full-screen scrollable
+  transcript view with `back`.
+- **Power button (AXP2101 PWRON)**: short tap = screen off/on, hold ≥6s =
+  hard power-off (chip-level, same as M5).
+- **BOOT (GPIO0)** — **reserved for the ES8311 audio path**, NOT used for
+  UI.
+- **Shake (QMI8658)** → DIZZY one-shot, same algorithm as M5
+  (delta > 0.8g, polled every 20ms).
+- **Face-down (QMI8658)** → nap mode (same debounce: enter ≥15 frames,
+  exit ≤−8 frames, az < −0.7g).
+
+Gesture recognizer lives in `src/gesture.cpp`. State machine: pen-down →
+record start (x0, y0, t0) → pen-up → classify by displacement + elapsed:
+TAP (<15px, <300ms), SWIPE (≥80px along dominant axis). Decisions happen
+on release — no live-fire during drag. See `src/gesture.h` for tunables.
 
 This replaces the `M5.BtnA/BtnB/Axp.GetBtnPress` logic in `loop()`.
 
@@ -101,15 +121,36 @@ This replaces the `M5.BtnA/BtnB/Axp.GetBtnPress` logic in `loop()`.
   pioarduino + octal PSRAM, flashed over native USB-Serial/JTAG.
   (The one-shot boot banner with the exact PSRAM size scrolls past before
   the USB-JTAG port re-enumerates; the steady crash-free loop is the proof.)
-- **Stage 3 — port `main.cpp`.** Replace `M5.*`/`spr` with HAL: Surface for
-  draw, QMI8658 for shake/face-down/orientation, AXP2101 for battery/power,
-  PCF85063 for clock, touch for input. Rescale geometry 135×240 → 368×448.
+- **Stage 3 — port `main.cpp`.** Replace `M5.*`/`spr` with HAL. Split into
+  sub-stages, each verified on hardware before merging:
+  - **3a/3b/3c — species through Surface.** ✅ Layout proof → animate cat
+    (7 states) → all 18 species compile through the new Surface API.
+  - **3d — BLE NimBLE bridge.** ✅ Stock BLE-Arduino conflicts with the
+    pioarduino core; switched to NimBLE. Claude desktop connects.
+  - **3f — buddy alive over BLE.** ✅ `src/stage3f_amoled.cpp`: minimal
+    runtime with BLE-heartbeat-driven persona state, on-screen APPROVE/
+    DENY touch zones, audio beep on prompt arrival.
+  - **3g — sensor HAL verification.** ✅ `src/stage3g_amoled.cpp`:
+    standalone harness for QMI8658 (accel + shake + face-down + temp),
+    PCF85063 (time/date), and AXP2101 PWRON (short/long press IRQ).
+    Closed the M5-side hardware features stage 3f couldn't reach.
+  - **3h — touch + gesture verification.** ✅ `src/stage3h_amoled.cpp` +
+    `src/gesture.cpp`: tap / swipe up/down/left/right recognition on top
+    of the touch HAL. Verified end-to-end on hardware.
+  - **3i (next) — fold HAL into a unified `main.cpp` port.** Bring in
+    `data.h` (transcript + owner + petname + RTC sync), `stats.h`
+    (mood/fed/energy/level + NVS), settings (sound/bt/wifi/led/clockRot
+    + NVS), and the full UI surface: HUD with transcript scrollback,
+    approval screen, INFO/PET pages, menus, reset modal, clock face.
+    Geometry rescaled 135×240 → 368×448. Input via gestures from 3h.
 - **Stage 4 — species + GIF.** Species files draw via Surface (drop
   `#include <M5StickCPlus.h>`, `extern Surface spr`). Re-center the 18 ASCII
-  pets and the GIF canvas for the larger screen; bump GIF target size.
+  pets (3a/3b/3c laid the groundwork) and the GIF canvas for the larger
+  screen; bump GIF target size; port `character.cpp` + `xfer.h`.
 - **Stage 5 — BLE + xfer.** `ble_bridge`/`data`/`xfer` are already
   hardware-agnostic (only `M5.Axp` reads in `xfer.h` status need swapping for
-  AXP2101). Wire protocol and `characters/` packs are unchanged.
+  AXP2101). NimBLE wire path already proven in 3f. Wire protocol and
+  `characters/` packs are unchanged.
 - **Stage 6 (optional) — LVGL** touch-native UI shell.
 
 ## Notes / gotchas
@@ -120,9 +161,24 @@ This replaces the `M5.BtnA/BtnB/Axp.GetBtnPress` logic in `loop()`.
   bump the base text size or introduce a layout scale factor.
 - `setBrightness()` is on the SH8601 panel object, not the canvas.
 - No panel reset/EN GPIO — `gfx->begin()` is enough (matches HelloWorld).
-- No buzzer: `beep()` is a no-op; optional tone later via ES8311 codec.
-- Touch/IMU/RTC/PMU all share **one** I²C bus (SDA=15, SCL=14). Init it once
-  and hand the same `Wire` to every driver.
+- Buzzer: ES8311 + I²S beep, verified — see `src/hal/audio_amoled.cpp`.
+- Touch/IMU/RTC/PMU/expander all share **one** I²C bus (SDA=15, SCL=14).
+  Init it once and hand the same `Wire` to every driver.
+- **XCA9554 GPIO expander at 0x20 holds touch/display RESET lines.** On a
+  cold cycle (e.g. when `powerInit` toggles the AXP2101 ALDO rails), the
+  FT3168 misses its first I²C ACK unless these RESET lines get a low→high
+  pulse via the expander. `powerInit()` does this automatically — repeats
+  the verbatim sequence from the vendor `04_GFX_FT3168_Image` example.
+  Without it, stage 3h's clean power cycle locks touch out, even though
+  stage 3f (which never toggled the rails) "worked" by accident.
+- **QMI8658 axis quirks (verified on hardware):**
+  - Returns g-units already (raw int16 × `range/32768`), NOT m/s² — do
+    NOT divide by 9.80665 a second time.
+  - z+ points INTO the screen on this board → board-flat z reads ≈ −1g.
+    `imu_amoled.cpp` flips z in HAL so the M5 face-down threshold
+    (`az < −0.7`) ports unchanged.
+- **PCF85063** address is hardcoded `0x51` inside `SensorPCF85063` —
+  matches this board.
 - **Toolchain:** the stock PlatformIO `espressif32` platform ships
   arduino-esp32 **2.0.x**, which lacks `esp32-hal-periman.h` that
   Arduino_GFX 1.4.x needs → build fails. Use the **pioarduino** platform
@@ -138,5 +194,7 @@ This replaces the `M5.BtnA/BtnB/Axp.GetBtnPress` logic in `loop()`.
   `Serial.setTxTimeoutMs(0)` so prints don't block when no monitor is open.
 - Partition: start with `default_16MB.csv`; a custom no-OTA layout gives more
   LittleFS room for GIF character packs if needed.
-- Cannot build/flash from this environment — all new code is **pending
-  on-device verification** with `pio run -e ws-amoled-18 -t upload`.
+- Build / flash: `make build` / `make flash` / `make flash-monitor`. PIO
+  binary auto-discovered at `~/.platformio/penv/bin/pio` (Makefile falls
+  back to PATH). Serial port default picks `/dev/ttyACM0` on Linux,
+  `/dev/cu.usbmodem11401` on macOS; override with `make flash PORT=...`.

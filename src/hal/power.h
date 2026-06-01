@@ -25,5 +25,22 @@ int  batteryPercent();      // 0..100, 0 if unknown
 bool onUsb();               // VBUS present
 bool charging();            // actively charging the cell
 
+// PWRON physical-button events (AXP2101).
+//
+// The M5 build used M5.Axp.GetBtnPress() returning a 3-state:
+//   0 = nothing, 1 = long, 2 = short. The AXP2101 latches short and long
+// press into separate IRQ-status bits; powerPollButton() reads them, clears
+// them, and returns the same intent in a typed enum. Call from the main
+// loop; safe at any rate (the chip latches between calls).
+//
+// Hardware-level hard-power-off on a sustained hold is handled by the
+// AXP2101 itself, same as the M5's AXP192 — nothing extra to do here.
+enum PwronEvent : uint8_t { PWRON_NONE = 0, PWRON_SHORT = 1, PWRON_LONG = 2 };
+PwronEvent powerPollButton();
+
+// Display rail power gate (replaces M5.Axp.SetLDO2 used for screen on/off).
+// ALDO1 + ALDO3 are the AMOLED panel rails powerInit() brings up.
+void powerSetDisplay(bool on);
+
 // Dump every rail (voltage + on/off) to Serial — bring-up diagnostic.
 void powerDumpRails();

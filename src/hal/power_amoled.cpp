@@ -1,4 +1,5 @@
 #include "power.h"
+#include "expander.h"
 #include "../board_pins.h"
 #include <Arduino.h>
 #include <Wire.h>
@@ -25,10 +26,26 @@ bool powerInit(TwoWire& w) {
   pmu.setALDO3Voltage(3300);
   pmu.enableALDO3();
 
+  // Touch + display + one more line on this board are held in reset by the
+  // XCA9554 expander at 0x20 (verified vs. the vendor 04_GFX_FT3168_Image
+  // example). Pulse them out of reset NOW — after the rails are up and
+  // before the display init / touch probe. Without this, FT3168 misses
+  // its first I2C ACK on a cold cycle (the AXP2101 rail toggle above
+  // counts as a cold cycle for everything downstream).
+  expanderInit(w);
+  expanderResetPulse();
+
   // Battery fuel-gauge + ADC channels, so the telemetry getters below work.
   pmu.enableBattVoltageMeasure();
   pmu.enableVbusVoltageMeasure();
   pmu.enableSystemVoltageMeasure();
+
+  // PWRON IRQ — short / long press latched in the chip's status reg so the
+  // main loop can poll powerPollButton() at any rate without losing events.
+  pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
+  pmu.clearIrqStatus();
+  pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ |
+                XPOWERS_AXP2101_PKEY_LONG_IRQ);
   return true;
 }
 
@@ -49,6 +66,25 @@ int batteryPercent() {
 
 bool onUsb()    { return ok && pmu.isVbusIn(); }
 bool charging() { return ok && pmu.isCharging(); }
+
+PwronEvent powerPollButton() {
+  if (!ok) return PWRON_NONE;
+  pmu.getIrqStatus();
+  PwronEvent ev = PWRON_NONE;
+  // Long takes priority: if both bits latched between polls (unlikely but
+  // possible on a long press followed by a release within one tick), the
+  // intent that matters is "user wants power off / hard action".
+  if      (pmu.isPekeyLongPressIrq())  ev = PWRON_LONG;
+  else if (pmu.isPekeyShortPressIrq()) ev = PWRON_SHORT;
+  pmu.clearIrqStatus();
+  return ev;
+}
+
+void powerSetDisplay(bool on) {
+  if (!ok) return;
+  if (on) { pmu.enableALDO1();  pmu.enableALDO3();  }
+  else    { pmu.disableALDO1(); pmu.disableALDO3(); }
+}
 
 void powerDumpRails() {
   if (!ok) { Serial.println("[pmu] (not initialised)"); return; }
