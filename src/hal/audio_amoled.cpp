@@ -32,7 +32,11 @@ static bool codecInit() {
   if (es8311_init(es, &clk, ES8311_RESOLUTION_16, ES8311_RESOLUTION_16) != ESP_OK) return false;
   es8311_sample_frequency_config(es, clk.mclk_frequency, clk.sample_frequency);
   es8311_microphone_config(es, false);
-  es8311_voice_volume_set(es, 80, nullptr);
+  // 50/100 — middle ground. Waveshare's reference uses 85 which is loud for
+  // an open office; 15 turned out to be effectively muted on hardware.
+  // Future settings UI will expose this; for now it's the default that
+  // actually lets you hear the beeps without disturbing anyone.
+  es8311_voice_volume_set(es, 50, nullptr);
   return true;
 }
 

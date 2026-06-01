@@ -6,3 +6,4 @@ data/
 .vscode/
 .idea/
 /.tmp/
+tools/.venv/

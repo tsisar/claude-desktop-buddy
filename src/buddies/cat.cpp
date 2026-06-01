@@ -44,8 +44,8 @@ static void doSleep(uint32_t t) {
 // ─── IDLE ───  ~16s cycle, 10 poses (sassy micro-actions)
 static void doIdle(uint32_t t) {
   static const char* const REST[5]    = { "            ", "   /\\_/\\    ", "  ( o o )   ", "  (  w  )   ", "  (\")_(\")   " };
-  static const char* const LOOK_L[5]  = { "            ", "   /\\_/\\    ", "  (o  o )   ", "  (  w  )   ", "  (\")_(\")   " };
-  static const char* const LOOK_R[5]  = { "            ", "   /\\_/\\    ", "  ( o  o)   ", "  (  w  )   ", "  (\")_(\")   " };
+  static const char* const LOOK_L[5]  = { "            ", "   /\\_/\\    ", "  ( - o )   ", "  (  w  )   ", "  (\")_(\")   " };
+  static const char* const LOOK_R[5]  = { "            ", "   /\\_/\\    ", "  ( o - )   ", "  (  w  )   ", "  (\")_(\")   " };
   static const char* const BLINK[5]   = { "            ", "   /\\_/\\    ", "  ( - - )   ", "  (  w  )   ", "  (\")_(\")   " };
   static const char* const SLOW_BL[5] = { "            ", "   /\\-/\\    ", "  ( _ _ )   ", "  (  w  )   ", "  (\")_(\")   " };
   static const char* const EAR_L[5]   = { "            ", "   <\\_/\\    ", "  ( o o )   ", "  (  w  )   ", "  (\")_(\")   " };
