@@ -88,6 +88,42 @@ enum UiState {
 };
 static UiState uiState = UI_NORMAL;
 
+// Display mode is orthogonal to modal stack: it picks WHAT renders
+// underneath the modal layer when uiState == UI_NORMAL.
+//   NORMAL → buddy + HUD (and clock face when conditions match)
+//   PET    → 2 pages: stats / how-to
+//   INFO   → 6 pages: ABOUT / BUTTONS / CLAUDE / DEVICE / BLUETOOTH / CREDITS
+// Cycled with swipe-down or BOOT short (when at home). Pagination inside
+// PET/INFO via swipe-left/right or PWRON-short/BOOT-short.
+enum DispMode {
+  DISP_NORMAL = 0,
+  DISP_PET,
+  DISP_INFO,
+  DISP_COUNT,
+};
+static DispMode displayMode = DISP_NORMAL;
+static uint8_t  petPage  = 0;
+static uint8_t  infoPage = 0;
+static const uint8_t PET_PAGES  = 2;
+static const uint8_t INFO_PAGES = 6;
+
+// Brightness lives up here so drawInfoDevice can read it. Apply funcs and
+// the settings-menu cycle path are defined further down with the rest of
+// the settings logic.
+static uint8_t brightLevel = 4;
+
+// PWRON short-press flips this. applyBrightness() honours it — sets the
+// SH8601 brightness register to 0 when off, which goes dark instantly
+// (rail toggle alone doesn't, the panel holds the last frame on its caps
+// for a beat). Rails stay live so touch keeps working and a second
+// PWRON-short brings the screen straight back without expander re-init.
+static bool screenOn = true;
+
+// BLE advertise name "Claude-XXXX" — populated in setup() and surfaced on
+// the INFO/BLUETOOTH page so the user knows which device is theirs when
+// multiple are in range.
+static char btName[16] = "Claude";
+
 enum ConfirmAction {
   CONF_NONE = 0,
   CONF_DELETE_CHAR,
@@ -272,6 +308,370 @@ static void drawApproval() {
   }
 }
 
+// ── clock face / PET / INFO drawing (3i.4) ─────────────────────────────────
+
+static const char* const MON[] = {
+  "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"
+};
+static const char* const DOW[] = { "Sun","Mon","Tue","Wed","Thu","Fri","Sat" };
+
+// Shown when on USB power, no live work, no prompt, no menu, and the RTC
+// has been time-synced by the bridge. Replaces the home view entirely
+// (buddy peek is dropped for stage 3i.4 — full-screen clock is plenty for
+// a desk-pet at rest).
+static void drawClock() {
+  gfx.fillSprite(0x0000);
+  RtcTime tm; RtcDate dt;
+  if (!rtcGetTime(&tm) || !rtcGetDate(&dt)) return;
+
+  char hm[6]; snprintf(hm, sizeof(hm), "%02u:%02u", tm.Hours, tm.Minutes);
+  // Seconds on their own row — drop the leading colon (it only made sense
+  // when they used to sit inline after the minutes).
+  char ss[3]; snprintf(ss, sizeof(ss), "%02u", tm.Seconds);
+  uint8_t mi = (dt.Month >= 1 && dt.Month <= 12) ? dt.Month - 1 : 0;
+  char dl[20];
+  snprintf(dl, sizeof(dl), "%s %s %02u",
+           DOW[dt.WeekDay % 7], MON[mi], dt.Date);
+
+  gfx.setTextDatum(MC_DATUM);
+  gfx.setTextSize(8);
+  gfx.setTextColor(0xFFFF, 0x0000);
+  gfx.drawString(hm, W / 2, H / 2 - 40);
+
+  gfx.setTextSize(4);
+  gfx.setTextColor(0xC618, 0x0000);
+  gfx.drawString(ss, W / 2, H / 2 + 50);
+
+  gfx.setTextSize(3);
+  gfx.drawString(dl, W / 2, H / 2 + 110);
+  gfx.setTextDatum(TL_DATUM);
+}
+
+// Header strip shared by PET / INFO pages: title left, page counter right.
+static void drawPageHeader(const char* title, uint8_t page, uint8_t pages, uint16_t accent) {
+  gfx.fillSprite(0x0000);
+  gfx.setTextSize(3);
+  gfx.setTextColor(0xFFFF, 0x0000);
+  gfx.setCursor(10, 12); gfx.print(title);
+  char pn[10]; snprintf(pn, sizeof(pn), "%u/%u", page + 1, pages);
+  gfx.setTextDatum(TR_DATUM);
+  gfx.setTextColor(accent, 0x0000);
+  gfx.drawString(pn, W - 10, 16);
+  gfx.setTextDatum(TL_DATUM);
+  gfx.drawFastHLine(0, 60, W, 0x4208);
+}
+
+// ── PET pages ──────────────────────────────────────────────────────────────
+static void drawPetStats() {
+  drawPageHeader(petName(), 0, PET_PAGES, 0xF810);
+  gfx.setTextSize(2);
+
+  int y = 80;
+  auto label = [&](const char* lbl) {
+    gfx.setTextColor(0xC618, 0x0000);
+    gfx.setCursor(10, y); gfx.print(lbl);
+  };
+
+  // Mood: 4 hearts (filled vs hollow).
+  uint8_t mood = statsMoodTier();
+  label("mood   ");
+  for (int i = 0; i < 4; i++) {
+    int cx = 120 + i * 30, cy = y + 8;
+    uint16_t col = (mood >= 3) ? 0xF800 : (mood >= 2) ? 0xFA20 : 0xC618;
+    if (i < mood) {
+      gfx.fillCircle(cx - 5, cy, 5, col);
+      gfx.fillCircle(cx + 5, cy, 5, col);
+      gfx.fillTriangle(cx - 10, cy + 2, cx + 10, cy + 2, cx, cy + 12, col);
+    } else {
+      gfx.drawCircle(cx - 5, cy, 5, 0x4208);
+      gfx.drawCircle(cx + 5, cy, 5, 0x4208);
+      gfx.drawLine(cx - 10, cy + 2, cx, cy + 12, 0x4208);
+      gfx.drawLine(cx + 10, cy + 2, cx, cy + 12, 0x4208);
+    }
+  }
+  y += 36;
+
+  // Fed: 10 dots (progress toward next level).
+  uint8_t fed = statsFedProgress();
+  label("fed    ");
+  for (int i = 0; i < 10; i++) {
+    int cx = 120 + i * 22, cy = y + 8;
+    if (i < fed) gfx.fillCircle(cx, cy, 6, 0x07E0);
+    else         gfx.drawCircle(cx, cy, 6, 0x4208);
+  }
+  y += 36;
+
+  // Energy: 5 bars (rest tier).
+  uint8_t en = statsEnergyTier();
+  label("energy ");
+  uint16_t enCol = (en >= 4) ? 0x07FF : (en >= 2) ? 0xFFE0 : 0xFA20;
+  for (int i = 0; i < 5; i++) {
+    int x = 120 + i * 28, ybar = y;
+    if (i < en) gfx.fillRect(x, ybar, 22, 16, enCol);
+    else        gfx.drawRect(x, ybar, 22, 16, 0x4208);
+  }
+  y += 40;
+
+  // Level badge.
+  gfx.fillRoundRect(10, y, 90, 32, 6, 0xA01F);
+  gfx.setTextColor(0xFFFF, 0xA01F);
+  gfx.setCursor(20, y + 8); gfx.printf("Lv %u", stats().level);
+  y += 48;
+
+  // Token / approval counters.
+  gfx.setTextColor(0xC618, 0x0000);
+  auto tokenLine = [&](const char* lbl, uint32_t v) {
+    gfx.setCursor(10, y); gfx.print(lbl);
+    char b[20];
+    if      (v >= 1000000) snprintf(b, sizeof(b), "%lu.%luM", v / 1000000, (v / 100000) % 10);
+    else if (v >= 1000)    snprintf(b, sizeof(b), "%lu.%luK", v / 1000,    (v / 100)    % 10);
+    else                   snprintf(b, sizeof(b), "%lu",      v);
+    gfx.setCursor(180, y); gfx.print(b);
+    y += 22;
+  };
+  tokenLine("tokens   ", stats().tokens);
+  tokenLine("today    ", tama.tokensToday);
+  y += 6;
+
+  gfx.setCursor(10, y); gfx.printf("approved %u", stats().approvals); y += 22;
+  gfx.setCursor(10, y); gfx.printf("denied   %u", stats().denials);   y += 22;
+  uint32_t nap = stats().napSeconds;
+  gfx.setCursor(10, y);
+  gfx.printf("napped   %luh %02lum", nap / 3600, (nap / 60) % 60);
+}
+
+static void drawPetHowTo() {
+  drawPageHeader(petName(), 1, PET_PAGES, 0xF810);
+  gfx.setTextSize(2);
+  int y = 80;
+  auto ln = [&](uint16_t c, const char* s) {
+    gfx.setTextColor(c, 0x0000); gfx.setCursor(10, y); gfx.print(s); y += 22;
+  };
+  auto gap = [&]() { y += 10; };
+
+  ln(0xF810, "MOOD");
+  ln(0xC618, " approve fast = up");
+  ln(0xC618, " deny lots = down"); gap();
+  ln(0x07E0, "FED");
+  ln(0xC618, " 50K tokens = lvl up");
+  ln(0xC618, " + confetti"); gap();
+  ln(0x07FF, "ENERGY");
+  ln(0xC618, " face-down to nap");
+  ln(0xC618, " refills to full"); gap();
+  ln(0xFFE0, "IDLE 30s = screen off");
+  ln(0xC618, " any input wakes it"); gap();
+  ln(0xFFFF, "swipe < APPROVE");
+  ln(0xFFFF, "swipe > DENY");
+}
+
+// ── INFO pages ─────────────────────────────────────────────────────────────
+static void drawInfoAbout() {
+  drawPageHeader("INFO", 0, INFO_PAGES, 0x07E0);
+  gfx.setTextSize(3);
+  gfx.setTextColor(0x07E0, 0x0000);
+  gfx.setCursor(10, 80); gfx.print("ABOUT");
+  gfx.setTextSize(2);
+  gfx.setTextColor(0xC618, 0x0000);
+  int y = 140;
+  const char* about[] = {
+    "I watch your Claude",
+    "desktop sessions.",
+    "",
+    "I sleep when nothing's",
+    "happening, wake when",
+    "you start working,",
+    "get impatient when",
+    "approvals pile up.",
+    "",
+    "Swipe LEFT on a prompt",
+    "to approve from here.",
+    "",
+    "19 species. Settings",
+    "> ascii pet to cycle.",
+  };
+  for (auto s : about) { gfx.setCursor(10, y); gfx.print(s); y += 22; }
+}
+
+static void drawInfoButtons() {
+  drawPageHeader("INFO", 1, INFO_PAGES, 0x07E0);
+  gfx.setTextSize(3);
+  gfx.setTextColor(0x07E0, 0x0000);
+  gfx.setCursor(10, 80); gfx.print("CONTROLS");
+  gfx.setTextSize(2);
+  int y = 130;
+  auto k = [&](uint16_t c, const char* lbl, const char* desc) {
+    gfx.setTextColor(c, 0x0000); gfx.setCursor(10, y); gfx.print(lbl);
+    gfx.setTextColor(0xC618, 0x0000); gfx.setCursor(160, y); gfx.print(desc);
+    y += 22;
+  };
+  k(0xFFFF, "swipe <",       "approve");
+  k(0xFFFF, "swipe >",       "deny");
+  k(0xFFFF, "tap HUD",       "scroll log");
+  k(0xFFFF, "swipe v",       "cycle mode");
+  k(0xFFFF, "swipe ^",       "open menu");
+  y += 10;
+  k(0xFFE0, "BOOT tap",      "cursor up");
+  k(0xFFE0, "PWR tap",       "cursor dn");
+  k(0xFFE0, "BOOT hold",     "select");
+  k(0xFFE0, "PWR hold",      "power off");
+}
+
+static void drawInfoClaude() {
+  drawPageHeader("INFO", 2, INFO_PAGES, 0x07E0);
+  gfx.setTextSize(3);
+  gfx.setTextColor(0x07E0, 0x0000);
+  gfx.setCursor(10, 80); gfx.print("CLAUDE");
+  gfx.setTextSize(2);
+  gfx.setTextColor(0xC618, 0x0000);
+  int y = 130;
+  auto kv = [&](const char* k, const char* v) {
+    gfx.setCursor(10, y); gfx.print(k);
+    gfx.setCursor(180, y); gfx.print(v);
+    y += 22;
+  };
+  char b[16];
+  snprintf(b, sizeof(b), "%u", tama.sessionsTotal);   kv("sessions",  b);
+  snprintf(b, sizeof(b), "%u", tama.sessionsRunning); kv("running",   b);
+  snprintf(b, sizeof(b), "%u", tama.sessionsWaiting); kv("waiting",   b);
+  y += 10;
+  gfx.setTextColor(0xFFFF, 0x0000);
+  gfx.setCursor(10, y); gfx.print("LINK"); y += 22;
+  gfx.setTextColor(0xC618, 0x0000);
+  kv("via",  dataScenarioName());
+  kv("ble",  bleConnected() ? (bleSecure() ? "encrypted" : "OPEN") : "-");
+  uint32_t age = tama.lastUpdated ? (millis() - tama.lastUpdated) / 1000 : 0;
+  snprintf(b, sizeof(b), "%lus", (unsigned long)age);
+  kv("last msg", b);
+}
+
+static void drawInfoDevice() {
+  drawPageHeader("INFO", 3, INFO_PAGES, 0x07E0);
+  gfx.setTextSize(3);
+  gfx.setTextColor(0x07E0, 0x0000);
+  gfx.setCursor(10, 80); gfx.print("DEVICE");
+
+  // Battery summary up top: % + state, large.
+  int pct = batteryPercent();
+  int mV  = batteryMilliVolts();
+  bool usb = onUsb();
+  bool charge = charging();
+  const char* state = !powerOk() ? "?"
+                    : charge   ? "charging"
+                    : usb      ? "usb"
+                    : "battery";
+  uint16_t stateCol = charge ? 0xFA20 : (usb ? 0x07E0 : 0xC618);
+  gfx.setTextSize(4);
+  gfx.setTextColor(0xFFFF, 0x0000);
+  gfx.setCursor(10, 130); gfx.printf("%d%%", pct);
+  gfx.setTextSize(2);
+  gfx.setTextColor(stateCol, 0x0000);
+  gfx.setCursor(110, 140); gfx.print(state);
+
+  gfx.setTextColor(0xC618, 0x0000);
+  int y = 195;
+  auto kv = [&](const char* k, const char* v) {
+    gfx.setCursor(10, y); gfx.print(k);
+    gfx.setCursor(180, y); gfx.print(v);
+    y += 22;
+  };
+  char b[24];
+  snprintf(b, sizeof(b), "%d.%02dV", mV / 1000, (mV % 1000) / 10);
+  kv("battery", b);
+
+  uint32_t up = millis() / 1000;
+  snprintf(b, sizeof(b), "%luh %02lum", up / 3600, (up / 60) % 60);
+  kv("uptime", b);
+
+  snprintf(b, sizeof(b), "%uKB", (unsigned)(ESP.getFreeHeap() / 1024));
+  kv("heap", b);
+
+  snprintf(b, sizeof(b), "%u/4", brightLevel);
+  kv("bright", b);
+
+  float t = imuTemp();
+  if (!isnan(t)) { snprintf(b, sizeof(b), "%dC", (int)t); kv("imu temp", b); }
+}
+
+static void drawInfoBluetooth(const char* btName) {
+  drawPageHeader("INFO", 4, INFO_PAGES, 0x07E0);
+  gfx.setTextSize(3);
+  gfx.setTextColor(0x07E0, 0x0000);
+  gfx.setCursor(10, 80); gfx.print("BLUETOOTH");
+  bool linked = bleConnected();
+
+  gfx.setTextSize(3);
+  gfx.setTextColor(linked ? 0x07E0 : 0xFA20, 0x0000);
+  gfx.setCursor(10, 130); gfx.print(linked ? "linked" : "discoverable");
+
+  gfx.setTextSize(2);
+  gfx.setTextColor(0xC618, 0x0000);
+  int y = 180;
+  gfx.setCursor(10, y); gfx.print("name"); gfx.setCursor(120, y); gfx.print(btName); y += 22;
+
+  uint8_t mac[6] = {0}; esp_read_mac(mac, ESP_MAC_BT);
+  char m[24];
+  snprintf(m, sizeof(m), "%02X:%02X:%02X:%02X:%02X:%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  gfx.setCursor(10, y); gfx.print("mac"); gfx.setCursor(120, y); gfx.print(m); y += 32;
+
+  if (linked) {
+    uint32_t age = tama.lastUpdated ? (millis() - tama.lastUpdated) / 1000 : 0;
+    gfx.setCursor(10, y); gfx.printf("last msg  %lus", (unsigned long)age);
+  } else {
+    gfx.setTextColor(0xFFFF, 0x0000);
+    gfx.setCursor(10, y); gfx.print("TO PAIR"); y += 24;
+    gfx.setTextColor(0xC618, 0x0000);
+    gfx.setCursor(10, y); gfx.print(" Open Claude desktop"); y += 22;
+    gfx.setCursor(10, y); gfx.print(" > Developer"); y += 22;
+    gfx.setCursor(10, y); gfx.print(" > Hardware Buddy"); y += 22;
+  }
+}
+
+static void drawInfoCredits() {
+  drawPageHeader("INFO", 5, INFO_PAGES, 0x07E0);
+  gfx.setTextSize(3);
+  gfx.setTextColor(0x07E0, 0x0000);
+  gfx.setCursor(10, 80); gfx.print("CREDITS");
+  gfx.setTextSize(2);
+  gfx.setTextColor(0xC618, 0x0000);
+  int y = 140;
+  auto ln = [&](uint16_t c, const char* s) {
+    gfx.setTextColor(c, 0x0000); gfx.setCursor(10, y); gfx.print(s); y += 22;
+  };
+  ln(0xC618, "made by");
+  ln(0xFFFF, "Felix Rieseberg"); y += 10;
+  ln(0xC618, "AMOLED port");
+  ln(0xFFFF, "github/tsisar"); y += 10;
+  ln(0xC618, "source");
+  ln(0xFFFF, "github.com/anthropics");
+  ln(0xFFFF, "/claude-desktop-buddy"); y += 10;
+  ln(0xC618, "hardware");
+  ln(0xFFFF, "Waveshare ESP32-S3");
+  ln(0xFFFF, "Touch-AMOLED-1.8");
+}
+
+// Dispatch for DISP_INFO based on infoPage.
+static void drawInfo(const char* btName) {
+  switch (infoPage) {
+    case 0: drawInfoAbout();             break;
+    case 1: drawInfoButtons();           break;
+    case 2: drawInfoClaude();            break;
+    case 3: drawInfoDevice();            break;
+    case 4: drawInfoBluetooth(btName);   break;
+    case 5: drawInfoCredits();           break;
+    default: drawInfoAbout();            break;
+  }
+}
+
+// Dispatch for DISP_PET based on petPage.
+static void drawPet() {
+  switch (petPage) {
+    case 0: drawPetStats(); break;
+    case 1: drawPetHowTo(); break;
+    default: drawPetStats(); break;
+  }
+}
+
 // ── modal helpers (3i.3) ───────────────────────────────────────────────────
 //
 // Modal panel: centered, 300 px wide, height grows with item count. Title
@@ -383,13 +783,15 @@ static const char* const SETTINGS_ITEMS[] = {
   "transcript", "clock rot", "ascii pet", "reset", "back",
 };
 static const int SETTINGS_N = sizeof(SETTINGS_ITEMS) / sizeof(SETTINGS_ITEMS[0]);
-static uint8_t brightLevel = 4;   // 0..4 → applied to panel brightness 20..100%
+// brightLevel itself is declared near the top of the file (drawInfoDevice
+// reads it); only the apply path lives here with the rest of settings.
 
 static void applyBrightness() {
   // Surface::setBrightness() forwards to the SH8601 panel. 0..255 range.
   // Map our 5 tiers to a comfortable curve (dim but readable to full).
+  // screenOn=false short-circuits to 0 — the PWRON screen-toggle path.
   static const uint8_t MAP[5] = { 40, 80, 130, 180, 230 };
-  if (dispOk) gfx.setBrightness(MAP[brightLevel]);
+  if (dispOk) gfx.setBrightness(screenOn ? MAP[brightLevel] : 0);
 }
 
 static void drawSettingsMenu() {
@@ -601,6 +1003,15 @@ static void stepBack() {
 }
 
 static void handleModalGesture(const GestureEvent& ev) {
+  // Mirror the open gesture: swipe-up opened the menu, swipe-up closes it
+  // — but it bails out of the whole modal stack in one go, not step-by-
+  // step. Confirm dialog treats the dismiss as Cancel.
+  if (ev.kind == GESTURE_SWIPE_UP) {
+    if (uiState == UI_CONFIRM) confirmAction = CONF_NONE;
+    enterState(UI_NORMAL);
+    beep(600, 30);
+    return;
+  }
   if (ev.kind == GESTURE_SWIPE_DOWN) { stepBack(); return; }
 
   if (ev.kind != GESTURE_TAP) return;
@@ -744,12 +1155,12 @@ void setup() {
   applyBrightness();
 
   uint8_t mac[6] = {0}; esp_read_mac(mac, ESP_MAC_BT);
-  char name[16]; snprintf(name, sizeof(name), "Claude-%02X%02X", mac[4], mac[5]);
-  bleInit(name);
+  snprintf(btName, sizeof(btName), "Claude-%02X%02X", mac[4], mac[5]);
+  bleInit(btName);
 
-  Serial.printf("[3i.3] disp=%d touch=%d imu=%d rtc=%d pmu=%d  name=%s\n",
-                dispOk, touchOk(), imuOk(), rtcOk(), powerOk(), name);
-  Serial.printf("[3i.3] audio ok=%d  sound=%d\n", audioOk(), settings().sound);
+  Serial.printf("[3i.4] disp=%d touch=%d imu=%d rtc=%d pmu=%d  name=%s\n",
+                dispOk, touchOk(), imuOk(), rtcOk(), powerOk(), btName);
+  Serial.printf("[3i.4] audio ok=%d  sound=%d\n", audioOk(), settings().sound);
 }
 
 void loop() {
@@ -777,6 +1188,10 @@ void loop() {
   // ── physical buttons (parallel to touch) ──
   BootEvent be = pollBoot();
   PwronEvent pw = powerPollButton();
+  if (pw != PWRON_NONE || be != BOOT_NONE) {
+    Serial.printf("[3i.4] btn  BOOT=%d PWRON=%d  ui=%d disp=%d\n",
+                  (int)be, (int)pw, (int)uiState, (int)displayMode);
+  }
 
   if (uiState != UI_NORMAL) {
     if      (be == BOOT_SHORT)  { navUp();   beep(1800, 20); }
@@ -784,15 +1199,27 @@ void loop() {
     else if (pw == PWRON_SHORT) { navDown(); beep(1800, 20); }
     // PWRON_LONG falls through — AXP2101 owns it (hardware power-off).
   } else {
-    // Normal home: PWRON short = screen toggle. BOOT long = open menu
-    // as an alternative to the swipe-up gesture, so the device is fully
-    // controllable with the physical buttons alone.
-    static bool screenOn = true;
-    if (pw == PWRON_SHORT) {
-      screenOn = !screenOn;
-      powerSetDisplay(screenOn);
-    }
+    // No modal up. BOOT long always opens the menu (parity with swipe-up).
     if (be == BOOT_LONG) { enterState(UI_MENU_MAIN); beep(800, 60); }
+
+    if (displayMode == DISP_NORMAL) {
+      // Home: PWRON = screen toggle, BOOT short = cycle display mode.
+      if (pw == PWRON_SHORT) {
+        screenOn = !screenOn;
+        applyBrightness();
+      }
+      if (be == BOOT_SHORT) {
+        displayMode = DISP_PET;   // NORMAL → PET
+        petPage = 0;
+        beep(1800, 30);
+      }
+    } else if (displayMode == DISP_PET) {
+      if (be == BOOT_SHORT)  { petPage = (petPage + 1) % PET_PAGES; beep(1800, 30); }
+      if (pw == PWRON_SHORT) { petPage = (petPage + PET_PAGES - 1) % PET_PAGES; beep(1800, 30); }
+    } else if (displayMode == DISP_INFO) {
+      if (be == BOOT_SHORT)  { infoPage = (infoPage + 1) % INFO_PAGES; beep(1800, 30); }
+      if (pw == PWRON_SHORT) { infoPage = (infoPage + INFO_PAGES - 1) % INFO_PAGES; beep(1800, 30); }
+    }
   }
 
   // ── touch dispatch ──
@@ -808,12 +1235,35 @@ void loop() {
     } else if (inPrompt) {
       if      (ev.kind == GESTURE_SWIPE_LEFT)  mockApprove();
       else if (ev.kind == GESTURE_SWIPE_RIGHT) mockDeny();
-    } else {
+    } else if (displayMode == DISP_NORMAL) {
       if      (ev.kind == GESTURE_SWIPE_UP) {
         enterState(UI_MENU_MAIN); beep(800, 60);
+      } else if (ev.kind == GESTURE_SWIPE_DOWN) {
+        displayMode = DISP_PET; petPage = 0; beep(1800, 30);
       } else if (ev.kind == GESTURE_TAP && ev.y >= HUD_TOP) {
         msgScroll = (msgScroll >= 30) ? 0 : msgScroll + 1;
         beep(1800, 30);
+      }
+    } else if (displayMode == DISP_PET) {
+      if      (ev.kind == GESTURE_SWIPE_UP) {
+        enterState(UI_MENU_MAIN); beep(800, 60);
+      } else if (ev.kind == GESTURE_SWIPE_DOWN) {
+        displayMode = DISP_INFO; infoPage = 0; beep(1800, 30);
+      } else if (ev.kind == GESTURE_SWIPE_LEFT) {
+        // Book convention: drag finger right-to-left to reveal next page.
+        petPage = (petPage + 1) % PET_PAGES; beep(1800, 30);
+      } else if (ev.kind == GESTURE_SWIPE_RIGHT) {
+        petPage = (petPage + PET_PAGES - 1) % PET_PAGES; beep(1800, 30);
+      }
+    } else if (displayMode == DISP_INFO) {
+      if      (ev.kind == GESTURE_SWIPE_UP) {
+        enterState(UI_MENU_MAIN); beep(800, 60);
+      } else if (ev.kind == GESTURE_SWIPE_DOWN) {
+        displayMode = DISP_NORMAL; beep(1800, 30);
+      } else if (ev.kind == GESTURE_SWIPE_LEFT) {
+        infoPage = (infoPage + 1) % INFO_PAGES; beep(1800, 30);
+      } else if (ev.kind == GESTURE_SWIPE_RIGHT) {
+        infoPage = (infoPage + INFO_PAGES - 1) % INFO_PAGES; beep(1800, 30);
       }
     }
   }
@@ -822,8 +1272,19 @@ void loop() {
   if (!dispOk || now < nextDraw) { delay(8); return; }
   nextDraw = now + 200;
 
-  if (inPrompt || responseSent) drawApproval();
-  else                          drawHome();
+  // Clock face takes over the home view when the device is parked: on USB,
+  // RTC synced, no live work, no prompt, no menu, in DISP_NORMAL.
+  bool clocking = (uiState == UI_NORMAL)
+               && (displayMode == DISP_NORMAL)
+               && !inPrompt && !responseSent
+               && tama.sessionsRunning == 0 && tama.sessionsWaiting == 0
+               && dataRtcValid() && onUsb();
+
+  if      (inPrompt || responseSent) drawApproval();
+  else if (clocking)                 drawClock();
+  else if (displayMode == DISP_PET)  drawPet();
+  else if (displayMode == DISP_INFO) drawInfo(btName);
+  else                               drawHome();
 
   switch (uiState) {
     case UI_MENU_MAIN:     drawMainMenu();     break;
