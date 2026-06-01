@@ -172,7 +172,11 @@ static int8_t   faceDownFrames    = 0;   // debounce: enter +15, exit -8
 static bool     napping           = false;
 static uint32_t napStartMs        = 0;
 static uint32_t lastPasskey       = 0;
-static const uint32_t SCREEN_OFF_MS = 30000;
+// Single idle timeout governs both screen-saver behaviours: after this much
+// time with no interaction the home view is "parked" — on USB it becomes the
+// clock face, on battery the panel turns off. Any input (touch / button /
+// shake / new prompt) resets it via wake().
+static const uint32_t IDLE_MS = 30000;
 
 static uint8_t derive(const TamaState& s) {
   if (!s.connected)           return P_IDLE;
@@ -412,6 +416,7 @@ static const char* const DOW[] = { "Sun","Mon","Tue","Wed","Thu","Fri","Sat" };
 // Colour signals: yellow = actively charging, green = healthy, orange =
 // low, red = critical.
 static void drawBatteryWidget(int bx, int by) {
+  if (!settings().battery) return;   // "battery" setting hides the widget
   int pct = batteryPercent();
   bool chg = charging();
 
@@ -953,7 +958,7 @@ static void applyMainMenu(int idx) {
 
 // ── settings menu (3i.3) ───────────────────────────────────────────────────
 static const char* const SETTINGS_ITEMS[] = {
-  "brightness", "sound", "transcript", "ascii pet", "reset", "back",
+  "brightness", "sound", "transcript", "battery", "ascii pet", "reset", "back",
 };
 static const int SETTINGS_N = sizeof(SETTINGS_ITEMS) / sizeof(SETTINGS_ITEMS[0]);
 // brightLevel itself is declared near the top of the file (drawInfoDevice
@@ -979,7 +984,8 @@ static void drawSettingsMenu() {
       case 0: snprintf(buf, sizeof(buf), "%u/4", brightLevel);   value = buf; break;
       case 1: boolish = true; boolval = s.sound; break;
       case 2: boolish = true; boolval = s.hud;   break;
-      case 3: {
+      case 3: boolish = true; boolval = s.battery; break;
+      case 4: {
         // tri-state cycle: ASCII species 0..N-1 → GIF (if installed) → 0
         uint8_t total = buddySpeciesCount() + (gifAvailable ? 1 : 0);
         uint8_t pos   = buddyMode ? buddySpeciesIdx() + 1 : total;
@@ -1022,16 +1028,17 @@ static void applySettings(int idx) {
   Settings& s = settings();
   switch (idx) {
     case 0: brightLevel = (brightLevel + 1) % 5; applyBrightness(); return;
-    case 1: s.sound = !s.sound; break;
-    case 2: s.hud   = !s.hud;   break;
-    case 3:
+    case 1: s.sound   = !s.sound;   break;
+    case 2: s.hud     = !s.hud;     break;
+    case 3: s.battery = !s.battery; break;
+    case 4:
       // tri-state cycle: ASCII species 0..N-1 → GIF (if installed) → 0
       cycleSpecies(+1);
       return;
-    case 4:   // reset → open reset sub-menu
+    case 5:   // reset → open reset sub-menu
       enterState(UI_MENU_RESET);
       return;
-    case 5:   // back → main
+    case 6:   // back → main
       enterState(UI_MENU_MAIN);
       return;
   }
@@ -1455,7 +1462,7 @@ void loop() {
   // Skipped during prompt (the user is mid-decision).
   bool inPromptNow = tama.promptId[0] && !responseSent;
   if (screenOn && !napping && !inPromptNow && !onUsb()
-      && (now - lastInteractMs > SCREEN_OFF_MS)) {
+      && (now - lastInteractMs > IDLE_MS)) {
     screenOn = false;
     applyBrightness();
     Serial.println("[3i.5] auto screen-off");
@@ -1575,12 +1582,16 @@ void loop() {
   nextDraw = now + 200;
 
   // Clock face takes over the home view when the device is parked: on USB,
-  // RTC synced, no live work, no prompt, no menu, in DISP_NORMAL.
+  // RTC synced, no live work, no prompt, no menu, in DISP_NORMAL — and only
+  // after IDLE_MS of no interaction, so the buddy gets the same grace period
+  // it gets on battery before the panel sleeps. Mirror image of the
+  // auto-screen-off above: USB parks to the clock, battery parks to dark.
   bool clocking = (uiState == UI_NORMAL)
                && (displayMode == DISP_NORMAL)
                && !inPrompt && !responseSent
                && tama.sessionsRunning == 0 && tama.sessionsWaiting == 0
-               && dataRtcValid() && onUsb();
+               && dataRtcValid() && onUsb()
+               && (now - lastInteractMs > IDLE_MS);
 
   // Passkey takes priority over everything except an actual approval
   // prompt — the user has 30s to type the code into the desktop.

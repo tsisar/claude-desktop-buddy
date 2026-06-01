@@ -81,14 +81,15 @@ mid-menu you can switch between the two without losing your place.
 The device tries to be invisible most of the time. These all run on
 their own without you touching anything:
 
-- **Clock face** appears when the device is parked: on USB, no live
-  sessions, no prompt, no menu, in DISP_NORMAL, and the RTC has been
-  time-synced by the bridge at least once. Any change (prompt arrives,
-  Claude starts working, you open a menu, USB unplug) brings the buddy
-  back.
-- **Auto screen-off** at 30 seconds of no input on battery. On USB the
-  screen stays lit (the clock face takes over). Any gesture / button /
-  prompt arrival / shake wakes it back up.
+- **Idle parking** — a single 30-second no-input timer drives both
+  screen-savers, so the buddy gets the same grace period either way:
+  - **On USB:** after 30 s idle the **clock face** takes over (screen
+    stays lit). Needs no live sessions, no prompt, no menu, DISP_NORMAL,
+    and the RTC time-synced by the bridge at least once.
+  - **On battery:** after 30 s idle the **screen turns off** to save
+    power.
+  - Any change (gesture / button / shake / prompt arrival / Claude starts
+    working / USB unplug) resets the timer and brings the buddy back.
 - **Face-down nap.** Put the device screen-down on a table for ~0.3 s
   and it dims, paused, and starts accumulating nap time. Pick it up and
   the energy meter refills, the buddy wakes. Skipped while an approval
@@ -117,11 +118,8 @@ their own without you touching anything:
 |---------------|----------------|------------------------------------------------------------------------|
 | brightness    | `N/4`          | Tap to cycle 0..4 (40..230 panel brightness)                           |
 | sound         | on / off       | Beep gate                                                              |
-| bluetooth     | on / off       | Stored preference; BLE stays advertising regardless on this build      |
-| wifi          | on / off       | Stored preference; no WiFi stack linked                                |
-| led           | on / off       | Stored preference; AMOLED board has no separate LED                    |
 | transcript    | on / off       | HUD on home                                                            |
-| clock rot     | auto / port / land | Affects M5 landscape rotation only; AMOLED is portrait-only         |
+| battery       | on / off       | Show/hide the battery widget on home and clock                         |
 | ascii pet     | `N/M`          | Cycle through species. With a GIF pack installed, the last slot is GIF |
 | reset         | →              | Opens the reset sub-menu                                               |
 | back          | →              | Return to main menu                                                    |
