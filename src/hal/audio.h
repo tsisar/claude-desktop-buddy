@@ -21,5 +21,10 @@ bool audioOk();
 // the PCM to I2S and returns when done). No-op if audioInit() failed.
 void audioBeep(uint16_t freq, uint16_t ms);
 
+// Play a short percussive "click" (key-press feel): a fast-decaying tick whose
+// body pitch is `freq`, with a noisy attack. Much shorter than audioBeep — the
+// UI feedback sound. Blocking; no-op if audioInit() failed.
+void audioClick(uint16_t freq);
+
 // 0..100 output volume (passed to the codec). Call after audioInit().
 void audioSetVolume(uint8_t pct);
