@@ -287,11 +287,14 @@ static void drawHUD() {
   }
 }
 
+static void drawBatteryWidget(int bx, int by);   // body lives further down
+
 static void drawHome() {
   gfx.fillSprite(0x0000);
   StateFn fn = SP->states[activeState];
   if (fn) fn(millis() / 200);
   drawHUD();
+  drawBatteryWidget(W - 12 - 14, 14);   // top-right, alongside the buddy
 }
 
 // ── approval screen (3i.2) ─────────────────────────────────────────────────
@@ -344,6 +347,43 @@ static const char* const MON[] = {
 };
 static const char* const DOW[] = { "Sun","Mon","Tue","Wed","Thu","Fri","Sat" };
 
+// Battery widget: tiny 12×28 vertical icon (tip up) with proportional fill
+// rising from the bottom, plus percentage text to the left at body centre.
+// Drawn in the top-right corner on the home buddy view and on the clock
+// face — the two views where there's empty space to the right of the
+// main content. PET / INFO have a page counter there, so they skip it.
+//
+// Colour signals: yellow = actively charging, green = healthy, orange =
+// low, red = critical.
+static void drawBatteryWidget(int bx, int by) {
+  int pct = batteryPercent();
+  bool chg = charging();
+
+  const int bw = 12, bh = 28;       // body
+  const int tipW = 6, tipH = 3;     // little nub on top
+
+  gfx.fillRect(bx + (bw - tipW) / 2, by, tipW, tipH, 0xC618);
+  gfx.drawRoundRect(bx, by + tipH, bw, bh, 2, 0xC618);
+
+  int innerX = bx + 2, innerY = by + tipH + 2;
+  int innerW = bw - 4, innerH = bh - 4;
+  int fillH  = (innerH * pct) / 100;
+  if (fillH > 0) {
+    uint16_t fc = chg       ? 0xFFE0   // yellow when charging
+                : pct >= 70 ? 0x07E0   // green
+                : pct >= 30 ? 0xFD20   // orange
+                            : 0xF800;  // red
+    gfx.fillRect(innerX, innerY + innerH - fillH, innerW, fillH, fc);
+  }
+
+  gfx.setTextSize(2);
+  gfx.setTextColor(0xFFFF, 0x0000);
+  gfx.setTextDatum(MR_DATUM);
+  char b[8]; snprintf(b, sizeof(b), "%d%%", pct);
+  gfx.drawString(b, bx - 6, by + tipH + bh / 2);
+  gfx.setTextDatum(TL_DATUM);
+}
+
 // Shown when on USB power, no live work, no prompt, no menu, and the RTC
 // has been time-synced by the bridge. Replaces the home view entirely
 // (buddy peek is dropped for stage 3i.4 — full-screen clock is plenty for
@@ -352,6 +392,8 @@ static void drawClock() {
   gfx.fillSprite(0x0000);
   RtcTime tm; RtcDate dt;
   if (!rtcGetTime(&tm) || !rtcGetDate(&dt)) return;
+  // Battery widget is now drawn globally in the loop after the main view,
+  // so the clock no longer paints it locally.
 
   char hm[6]; snprintf(hm, sizeof(hm), "%02u:%02u", tm.Hours, tm.Minutes);
   // Seconds on their own row — drop the leading colon (it only made sense
@@ -374,6 +416,8 @@ static void drawClock() {
   gfx.setTextSize(3);
   gfx.drawString(dl, W / 2, H / 2 + 110);
   gfx.setTextDatum(TL_DATUM);
+
+  drawBatteryWidget(W - 12 - 14, 14);   // top-right
 }
 
 // Header strip shared by PET / INFO pages: title left, page counter right.
@@ -1423,6 +1467,8 @@ void loop() {
   else if (displayMode == DISP_PET)  drawPet();
   else if (displayMode == DISP_INFO) drawInfo(btName);
   else                               drawHome();
+  // Battery widget is drawn locally inside drawClock() and drawPet() — see
+  // those functions. Home / INFO / approval / passkey skip it.
 
   switch (uiState) {
     case UI_MENU_MAIN:     drawMainMenu();     break;
