@@ -59,6 +59,9 @@ bool gifAvailable = false;   // flipped to true when characterInit succeeds
 Surface gfx;
 static bool dispOk = false;
 static const int W = LCD_WIDTH, H = LCD_HEIGHT;
+// Extra inset for corner-anchored UI so it clears the panel's rounded glass.
+// Bump this if elements still clip in the corners.
+static const int SAFE = 4;
 
 // ── buddy_common.h symbol definitions (Surface backing) ────────────────────
 const int BUDDY_X_CENTER  = W / 2;
@@ -310,11 +313,11 @@ static void drawTranscript() {
   gfx.fillSprite(0x0000);
   gfx.setTextSize(3);
   gfx.setTextColor(0xFFFF, 0x0000);
-  gfx.setCursor(10, 12); gfx.print("LOG");
+  gfx.setCursor(10 + SAFE, 12 + SAFE); gfx.print("LOG");
   gfx.setTextSize(2);
   gfx.setTextColor(0x07E0, 0x0000);
   gfx.setTextDatum(TR_DATUM);
-  gfx.drawString("swipe ^ = close", W - 10, 18);
+  gfx.drawString("swipe ^ = close", W - 10 - SAFE, 18 + SAFE);
   gfx.setTextDatum(TL_DATUM);
   gfx.drawFastHLine(0, 44, W, 0x4208);
 
@@ -408,7 +411,7 @@ static void drawHome() {
     buddyTick(activeState);   // ASCII species path
   }
   if (settings().hud) drawHUD();   // "transcript" setting gates the HUD
-  drawBatteryWidget(W - 12 - 14, 14);   // top-right, alongside the buddy
+  drawBatteryWidget(W - 12 - 14 - SAFE, 14 + SAFE);   // top-right, alongside the buddy
 }
 
 // ── approval screen (3i.2) ─────────────────────────────────────────────────
@@ -424,7 +427,7 @@ static void drawApproval() {
   } else {
     buddyTick(P_ATTENTION);
   }
-  drawBatteryWidget(W - 12 - 14, 14);   // top-right, same as home
+  drawBatteryWidget(W - 12 - 14 - SAFE, 14 + SAFE);   // top-right, same as home
 
   // ── approval card (bottom third) ──
   const int cardTop = 296;
@@ -572,7 +575,7 @@ static void drawClock() {
   gfx.drawString(dl, W / 2, H / 2 + 110);
   gfx.setTextDatum(TL_DATUM);
 
-  drawBatteryWidget(W - 12 - 14, 14);   // top-right
+  drawBatteryWidget(W - 12 - 14 - SAFE, 14 + SAFE);   // top-right
 }
 
 // Header strip shared by PET / INFO pages: title left, page counter right.
@@ -580,11 +583,11 @@ static void drawPageHeader(const char* title, uint8_t page, uint8_t pages, uint1
   gfx.fillSprite(0x0000);
   gfx.setTextSize(3);
   gfx.setTextColor(0xFFFF, 0x0000);
-  gfx.setCursor(10, 12); gfx.print(title);
+  gfx.setCursor(10 + SAFE, 12 + SAFE); gfx.print(title);
   char pn[10]; snprintf(pn, sizeof(pn), "%u/%u", page + 1, pages);
   gfx.setTextDatum(TR_DATUM);
   gfx.setTextColor(accent, 0x0000);
-  gfx.drawString(pn, W - 10, 16);
+  gfx.drawString(pn, W - 10 - SAFE, 16 + SAFE);
   gfx.setTextDatum(TL_DATUM);
   gfx.drawFastHLine(0, 60, W, 0x4208);
 }
@@ -706,10 +709,9 @@ static void drawInfoAbout() {
     "desktop sessions.",
     "",
     "I sleep when nothing's",
-    "happening, wake when",
-    "you start working,",
-    "get impatient when",
-    "approvals pile up.",
+    "happening, wake when you",
+    "start working, get impatient",
+    "when approvals pile up.",
     "",
     "Swipe RIGHT on a prompt",
     "to approve from here.",
