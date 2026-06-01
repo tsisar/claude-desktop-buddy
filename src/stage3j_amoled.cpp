@@ -386,10 +386,10 @@ static void drawApproval() {
     gfx.drawString("sent...", W / 2, H - 60);
     gfx.setTextDatum(TL_DATUM);
   } else {
-    gfx.setTextColor(0x07E0, 0x0000);
-    gfx.setCursor(20, H - 60); gfx.print("< APPROVE");
     gfx.setTextColor(0xFA20, 0x0000);
-    const char* right = "DENY >";
+    gfx.setCursor(20, H - 60); gfx.print("< DENY");
+    gfx.setTextColor(0x07E0, 0x0000);
+    const char* right = "APPROVE >";
     int rw = strlen(right) * 6 * 3;
     gfx.setCursor(W - rw - 20, H - 60); gfx.print(right);
   }
@@ -588,8 +588,8 @@ static void drawPetHowTo() {
   ln(0xC618, " refills to full"); gap();
   ln(0xFFE0, "IDLE 30s = screen off");
   ln(0xC618, " any input wakes it"); gap();
-  ln(0xFFFF, "swipe < APPROVE");
-  ln(0xFFFF, "swipe > DENY");
+  ln(0xFFFF, "swipe > APPROVE");
+  ln(0xFFFF, "swipe < DENY");
 }
 
 // ── INFO pages ─────────────────────────────────────────────────────────────
@@ -611,11 +611,11 @@ static void drawInfoAbout() {
     "get impatient when",
     "approvals pile up.",
     "",
-    "Swipe LEFT on a prompt",
+    "Swipe RIGHT on a prompt",
     "to approve from here.",
     "",
-    "19 species. Settings",
-    "> ascii pet to cycle.",
+    "18 species. Swipe L/R",
+    "on home to change pet.",
   };
   for (auto s : about) { gfx.setCursor(10, y); gfx.print(s); y += 22; }
 }
@@ -632,8 +632,9 @@ static void drawInfoButtons() {
     gfx.setTextColor(0xC618, 0x0000); gfx.setCursor(160, y); gfx.print(desc);
     y += 22;
   };
-  k(0xFFFF, "swipe <",       "approve");
-  k(0xFFFF, "swipe >",       "deny");
+  k(0xFFFF, "swipe >",       "approve");
+  k(0xFFFF, "swipe <",       "deny");
+  k(0xFFFF, "swipe </>",     "change pet");
   k(0xFFFF, "tap HUD",       "scroll log");
   k(0xFFFF, "swipe v",       "cycle mode");
   k(0xFFFF, "swipe ^",       "open menu");
@@ -999,6 +1000,26 @@ static void drawSettingsMenu() {
   }
 }
 
+// Cycle the active character through the tri-state order used everywhere:
+// ASCII species 0..N-1, then the GIF character as a final slot when one is
+// installed. dir = +1 → next, -1 → previous; both wrap around. Persists the
+// choice so it survives a reboot (0xFF is the "boot into GIF" sentinel).
+static void cycleSpecies(int dir) {
+  uint8_t n     = buddySpeciesCount();
+  uint8_t total = n + (gifAvailable ? 1 : 0);
+  if (total == 0) return;
+  uint8_t pos = buddyMode ? buddySpeciesIdx() : n;   // slot n == the GIF
+  pos = (uint8_t)((pos + total + dir) % total);
+  if (pos < n) {
+    buddyMode = true;
+    buddySetSpeciesIdx(pos);
+    speciesIdxSave(pos);
+  } else {
+    buddyMode = false;             // landed on the GIF slot
+    speciesIdxSave(0xFF);
+  }
+}
+
 static void applySettings(int idx) {
   Settings& s = settings();
   switch (idx) {
@@ -1011,22 +1032,7 @@ static void applySettings(int idx) {
     case 6: s.clockRot = (s.clockRot + 1) % 3; break;
     case 7:
       // tri-state cycle: ASCII species 0..N-1 → GIF (if installed) → 0
-      if (gifAvailable) {
-        if (!buddyMode) {
-          // currently on GIF — drop back to ASCII species 0
-          buddyMode = true;
-          buddySetSpeciesIdx(0);
-          speciesIdxSave(0);
-        } else if (buddySpeciesIdx() + 1 >= buddySpeciesCount()) {
-          // last ASCII species — flip to GIF
-          buddyMode = false;
-          speciesIdxSave(0xFF);   // sentinel "use GIF" on boot
-        } else {
-          buddyNextSpecies();
-        }
-      } else {
-        buddyNextSpecies();
-      }
+      cycleSpecies(+1);
       return;
     case 8:   // reset → open reset sub-menu
       enterState(UI_MENU_RESET);
@@ -1528,13 +1534,18 @@ void loop() {
     if (uiState != UI_NORMAL) {
       handleModalGesture(ev);
     } else if (inPrompt) {
-      if      (ev.kind == GESTURE_SWIPE_LEFT)  mockApprove();
-      else if (ev.kind == GESTURE_SWIPE_RIGHT) mockDeny();
+      if      (ev.kind == GESTURE_SWIPE_RIGHT) mockApprove();
+      else if (ev.kind == GESTURE_SWIPE_LEFT)  mockDeny();
     } else if (displayMode == DISP_NORMAL) {
       if      (ev.kind == GESTURE_SWIPE_UP) {
         enterState(UI_MENU_MAIN); beep(800, 60);
       } else if (ev.kind == GESTURE_SWIPE_DOWN) {
         displayMode = DISP_PET; petPage = 0; beep(1800, 30);
+      } else if (ev.kind == GESTURE_SWIPE_RIGHT) {
+        // Home: swipe through characters. Right = next, left = previous.
+        cycleSpecies(+1); beep(1800, 30);
+      } else if (ev.kind == GESTURE_SWIPE_LEFT) {
+        cycleSpecies(-1); beep(1800, 30);
       } else if (ev.kind == GESTURE_TAP && ev.y >= HUD_TOP) {
         msgScroll = (msgScroll >= 30) ? 0 : msgScroll + 1;
         beep(1800, 30);

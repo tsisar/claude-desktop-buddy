@@ -46,8 +46,10 @@ Everything that used to be M5's A/B buttons is touch-based now.
 
 | Gesture                  | Where           | What it does                                                       |
 |--------------------------|-----------------|--------------------------------------------------------------------|
-| **swipe left**           | home (prompt)   | Approve the permission request                                     |
-| **swipe right**          | home (prompt)   | Deny the permission request                                        |
+| **swipe right**          | home (prompt)   | Approve the permission request                                     |
+| **swipe left**           | home (prompt)   | Deny the permission request                                        |
+| **swipe right**          | home (no prompt)| Next pet / character                                               |
+| **swipe left**           | home (no prompt)| Previous pet / character                                           |
 | **swipe left**           | PET / INFO      | Next page                                                          |
 | **swipe right**          | PET / INFO      | Previous page                                                      |
 | **swipe up**             | home            | Open the menu                                                      |
@@ -163,8 +165,8 @@ When Claude needs permission for a tool call:
 2. The approval view shows: **timer** (`approve? Ns`, turns red after
    10 s), **tool name** centered (auto-sized 5/4/3 depending on length),
    **wrapped hint** below, and **swipe hints** at the bottom: `<
-   APPROVE | DENY >`.
-3. **Swipe left** approves → bottom row shows `sent…`. **Swipe right**
+   DENY | APPROVE >`.
+3. **Swipe right** approves → bottom row shows `sent…`. **Swipe left**
    denies → same. Buddy reacts: HEART if you were under 5 seconds,
    regular state otherwise.
 4. The desktop forwards your decision to Claude.
