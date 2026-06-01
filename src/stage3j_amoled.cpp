@@ -74,8 +74,8 @@ void buddySetCursor(int x, int y) { gfx.setCursor(BUDDY_X_CENTER + (x-BUDDY_X_CE
 void buddySetColor(uint16_t fg) { gfx.setTextColor(fg, BUDDY_BG); }
 void buddyPrint(const char* s) { gfx.setTextSize(SCALE); gfx.print(s); }
 
-extern const Species CAT_SPECIES;
-static const Species* SP = &CAT_SPECIES;
+// Species registry + buddyTick live in src/buddy_amoled.cpp now (Stage 4).
+// Stage3j just drives the state machine and calls buddyTick(activeState).
 
 enum { P_SLEEP, P_IDLE, P_BUSY, P_ATTENTION, P_CELEBRATE, P_DIZZY, P_HEART };
 
@@ -291,8 +291,7 @@ static void drawBatteryWidget(int bx, int by);   // body lives further down
 
 static void drawHome() {
   gfx.fillSprite(0x0000);
-  StateFn fn = SP->states[activeState];
-  if (fn) fn(millis() / 200);
+  buddyTick(activeState);   // species pulled from buddy_amoled.cpp registry
   drawHUD();
   drawBatteryWidget(W - 12 - 14, 14);   // top-right, alongside the buddy
 }
@@ -908,12 +907,8 @@ static void drawSettingsMenu() {
       case 4: boolish = true; boolval = s.led;   break;
       case 5: boolish = true; boolval = s.hud;   break;
       case 6: value = ROT_NAMES[s.clockRot < 3 ? s.clockRot : 0]; break;
-      case 7:
-        // buddySpeciesIdx() / buddySpeciesCount() live in buddy.cpp which
-        // isn't linked yet (Stage 4). Leave the value column empty so the
-        // row label still reads correctly; cycle becomes a no-op too.
-        value = nullptr;
-        break;
+      case 7: snprintf(buf, sizeof(buf), "%u/%u",
+                       buddySpeciesIdx() + 1, buddySpeciesCount()); value = buf; break;
       // 8/reset and 9/back have no value column
     }
     uint16_t valueCol = 0x07E0;
@@ -936,8 +931,9 @@ static void applySettings(int idx) {
     case 5: s.hud   = !s.hud;   break;
     case 6: s.clockRot = (s.clockRot + 1) % 3; break;
     case 7:
-      // Species cycling stub — only CAT is wired in this stage. Real cycle
-      // arrives with the rest of buddies/* loading in Stage 4.
+      // Cycle through the 18 species; buddy_amoled.cpp persists the new
+      // index to NVS, so the choice survives a reboot.
+      buddyNextSpecies();
       return;
     case 8:   // reset → open reset sub-menu
       enterState(UI_MENU_RESET);
@@ -1249,6 +1245,7 @@ void setup() {
   statsLoad();
   settingsLoad();
   petNameLoad();
+  buddyInit();   // pulls saved species index from NVS (defaults to 0)
   applyBrightness();
   lastInteractMs = millis();   // arm the auto-screen-off countdown from boot
 
