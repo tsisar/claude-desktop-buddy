@@ -33,7 +33,6 @@
 #include "board_pins.h"
 #include "hal/display.h"
 #include "hal/power.h"
-#include "fonts/u8g2_font_6x12_t_cyrillic.h"
 #include "hal/audio.h"
 #include "hal/imu.h"
 #include "hal/rtc.h"
@@ -190,7 +189,7 @@ static uint8_t derive(const TamaState& s) {
   if (!s.connected)           return P_IDLE;
   if (s.sessionsWaiting > 0)  return P_ATTENTION;
   if (s.recentlyCompleted)    return P_CELEBRATE;
-  if (s.sessionsRunning >= 3) return P_BUSY;
+  if (s.sessionsRunning >= 1) return P_BUSY;   // any active session = busy
   return P_IDLE;
 }
 
@@ -251,6 +250,10 @@ static uint8_t wrapInto(const char* in, char out[][48], uint8_t maxRows, uint8_t
     if (col > 1 || (col == 1 && out[row][0] != ' ')) out[row][col++] = ' ';
     while (wlen > width - col) {
       uint8_t take = width - col;
+      // Snap the break back to a UTF-8 char boundary so a multi-byte glyph
+      // isn't split (which would render as a garbage box).
+      while (take > 0 && ((unsigned char)w[take] & 0xC0) == 0x80) take--;
+      if (take == 0) take = width - col;   // single glyph wider than line
       memcpy(&out[row][col], w, take); col += take; w += take; wlen -= take;
       out[row][col] = 0;
       if (++row >= maxRows) return row;
@@ -1441,13 +1444,6 @@ void setup() {
   Wire.begin(IIC_SDA, IIC_SCL, 400000);
   powerInit(Wire);
   dispOk = gfx.begin();
-  if (dispOk) {
-    // u8g2 6×12 font with Cyrillic coverage + UTF-8 decode on the print
-    // pipeline. Letters from heartbeat msg / transcript / promptHint now
-    // render as actual Cyrillic glyphs instead of '?'.
-    gfx.setUTF8Print(true);
-    gfx.setFont(u8g2_font_6x12_t_cyrillic);
-  }
   imuInit(Wire);
   rtcInit(Wire);
   audioInit(Wire);
@@ -1487,6 +1483,14 @@ void loop() {
   // ── backend pump ──
   dataPoll(&tama);
   if (statsPollLevelUp()) triggerOneShot(P_CELEBRATE, 3000);
+
+  // The desktop never sends "completed" — a finished turn shows up as
+  // running dropping back to 0 (msg becomes "done (success), N turns").
+  // Detect that edge and celebrate it.
+  static uint8_t prevRunning = 0;
+  if (tama.connected && prevRunning > 0 && tama.sessionsRunning == 0)
+    triggerOneShot(P_CELEBRATE, 3000);
+  prevRunning = tama.sessionsRunning;
 
   uint8_t base = derive(tama);
   if ((int32_t)(now - oneShotUntil) >= 0) activeState = base;

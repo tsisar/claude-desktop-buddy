@@ -88,16 +88,16 @@ inline bool dataRtcValid() { return _rtcValid; }
 // the inline definition in the single .cpp that includes xfer_amoled.h.
 bool xferCommand(JsonDocument& doc);
 
-// Raw copy: UTF-8 passes through unchanged; just strip control bytes and
-// cap the destination length. Stage 4d's u8g2_font_6x12_t_cyrillic is set
-// on the print pipeline, so Cyrillic, Latin, and assorted symbols render
-// directly without transliteration. Emoji + CJK still come out as the
-// font's missing-glyph box because the font doesn't cover them, but
-// that's a font issue, not a copy issue.
-//
-// The legacy "ascii" name is kept because the call sites already use it
-// and the renaming churn isn't worth the diff.
-#if 0   // legacy transliteration table — kept for reference, no longer used.
+// Sanitise incoming text into the built-in 6x8 font's character set: strip
+// control bytes, pass ASCII through, romanise Cyrillic via _cyrillicTranslit,
+// map a few common punctuation marks, and fall back to '?' for anything else
+// (emoji / CJK). The panel has no working Cyrillic glyph font, so romanised
+// Latin is the readable option. The "ascii" name predates this and is kept to
+// avoid churning every call site.
+// Cyrillic → Latin transliteration. The bundled u8g2 "cyrillic" font turned
+// out not to actually render Cyrillic glyphs on this panel, and there's no
+// real Cyrillic bitmap font to embed, so we romanise instead — readable
+// Latin beats blank/garbage. RU + UA coverage.
 static const char* _cyrillicTranslit(uint32_t cp) {
   switch (cp) {
     // Russian uppercase A..Я
@@ -144,16 +144,34 @@ static const char* _cyrillicTranslit(uint32_t cp) {
     default:     return nullptr;
   }
 }
-#endif
 
 static void _asciiCopy(char* dst, size_t dstLen, const char* src) {
   if (!dstLen) return;
-  size_t j = 0;
-  for (size_t i = 0; src[i] && j < dstLen - 1; i++) {
+  size_t j = 0, i = 0;
+  while (src[i] && j + 1 < dstLen) {
     unsigned char c = (unsigned char)src[i];
-    // Strip control bytes (< 0x20), pass everything else through verbatim.
-    // Multi-byte UTF-8 sequences ride along — the printer decodes them.
-    if (c >= 0x20) dst[j++] = (char)c;
+    if (c < 0x20) { i++; continue; }                       // control byte
+    if (c < 0x80) { dst[j++] = (char)c; i++; continue; }   // ASCII passthrough
+    // Decode one UTF-8 multibyte sequence into a codepoint.
+    uint32_t cp; int n;
+    if      ((c & 0xE0) == 0xC0) { cp = c & 0x1F; n = 1; }
+    else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; n = 2; }
+    else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; n = 3; }
+    else { i++; continue; }                                // stray continuation
+    i++;
+    while (n-- > 0 && ((unsigned char)src[i] & 0xC0) == 0x80) {
+      cp = (cp << 6) | ((unsigned char)src[i] & 0x3F); i++;
+    }
+    const char* t = _cyrillicTranslit(cp);                 // Cyrillic → Latin
+    if (!t) switch (cp) {                                  // common punctuation
+      case 0x2014: case 0x2013: t = "-";   break;          // em / en dash
+      case 0x2018: case 0x2019: t = "'";   break;          // curly single quote
+      case 0x201C: case 0x201D: t = "\"";  break;          // curly double quote
+      case 0x2026:              t = "...";  break;          // ellipsis
+      default: break;
+    }
+    if (t) { for (; *t && j + 1 < dstLen; t++) dst[j++] = *t; }
+    else if (j + 1 < dstLen) dst[j++] = '?';               // unknown (emoji/CJK)
   }
   dst[j] = 0;
 }

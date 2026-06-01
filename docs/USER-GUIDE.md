@@ -30,7 +30,7 @@ The buddy reacts to what Claude is doing:
 |--------------|-------------------------------------------------------|
 | **sleep**    | No bridge connection, or just after waking the screen |
 | **idle**     | Bridge connected, no running sessions                 |
-| **busy**     | 3 or more sessions actively generating                |
+| **busy**     | One or more sessions actively generating              |
 | **attention**| A session is waiting on a permission prompt           |
 | **celebrate**| A session just completed (3 s one-shot); also fires on level-up |
 | **dizzy**    | You shook the device                                  |
@@ -199,3 +199,7 @@ clears the stored bond), or send `{"cmd":"unpair"}` from the bridge.
 | Custom GIF didn't appear after push    | `char_end ok=false` means the pack landed but parsing failed — check manifest.json |
 | Can't pair                             | Factory reset clears the stored bond, then re-pair fresh             |
 | Hard power-off                         | Hold the PWRON button for ~6 seconds                                 |
+
+ ▐▛███▜▌
+▝▜█████▛▘
+  ▘▘ ▝▝

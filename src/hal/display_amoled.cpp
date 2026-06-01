@@ -58,12 +58,7 @@ void Surface::setTextColor(uint16_t fg) { _cv->setTextColor(fg); }
 void Surface::setTextColor(uint16_t fg, uint16_t bg) { _cv->setTextColor(fg, bg); }
 void Surface::setTextSize(uint8_t s) { _tsx = _tsy = s; _cv->setTextSize(s); }
 void Surface::setTextSize(uint8_t sx, uint8_t sy, uint8_t margin) { _tsx = sx; _tsy = sy; _cv->setTextSize(sx, sy, margin); }
-void Surface::setCursor(int16_t x, int16_t y) {
-  // Keep top-left anchoring: u8g2 treats cursor_y as the baseline, so shift
-  // down by the cap-ascent (scaled by text size). _u8g2Ascent is 0 for the
-  // built-in font, leaving its native top-left behaviour untouched.
-  _cv->setCursor(x, y + _u8g2Ascent * _tsy);
-}
+void Surface::setCursor(int16_t x, int16_t y) { _cv->setCursor(x, y); }
 void Surface::setTextDatum(uint8_t datum) { _datum = datum; }
 void Surface::print(const char* s) { _cv->print(s); }
 void Surface::print(char c) { _cv->print(c); }
@@ -96,22 +91,8 @@ void Surface::drawString(const char* s, int16_t x, int16_t y) {
     case BR_DATUM: ox = x - w;     oy = y - h; break;
     default: break;  // TL_DATUM
   }
-  // Same baseline compensation as setCursor(): oy is the intended top-left,
-  // u8g2 wants the baseline, so push down by the cap-ascent.
-  _cv->setCursor(ox, oy + _u8g2Ascent * _tsy);
+  _cv->setCursor(ox, oy);
   _cv->print(s);
 }
 
 void Surface::setBrightness(uint8_t b) { if (_pnl) _pnl->setBrightness(b); }
-
-void Surface::setFont(const uint8_t* u8g2Font) {
-  if (_cv) _cv->setFont(u8g2Font);
-  // Cache the font's cap-ascent (ascent_A, signed byte at header offset 13)
-  // so setCursor()/drawString() can convert the firmware's top-left cursor
-  // into the baseline u8g2 expects. Null font → built-in 6x8, no shift.
-  _u8g2Ascent = u8g2Font ? (int8_t)u8g2Font[13] : 0;
-}
-
-void Surface::setUTF8Print(bool enable) {
-  if (_cv) _cv->setUTF8Print(enable);
-}
