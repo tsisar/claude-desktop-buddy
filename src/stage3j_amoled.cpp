@@ -163,6 +163,10 @@ static uint32_t  promptArrivedMs = 0;
 static char      lastPromptId[40] = "";
 static bool      responseSent  = false;
 static uint8_t   tScroll       = 0;   // transcript view: lines scrolled back from the tail
+// Approval swipe feedback: a brief edge glow on the side you swiped —
+// green/right = approve, red/left = deny. Side: +1 right, -1 left, 0 none.
+static uint32_t  decisionFlashUntil = 0;
+static int8_t    decisionFlashSide  = 0;
 
 // ── auto-behaviours (3i.5) ─────────────────────────────────────────────────
 static uint32_t lastInteractMs    = 0;   // any input or prompt arrival
@@ -476,6 +480,17 @@ static void drawApproval() {
     gfx.setTextColor(0x8410, 0x0000);
     gfx.drawString("sent...", W / 2, H - 36);
     gfx.setTextDatum(TL_DATUM);
+  }
+
+  // Swipe feedback: a brief 3-step glow inward from the edge you swiped.
+  if (decisionFlashSide != 0 && (int32_t)(millis() - decisionFlashUntil) < 0) {
+    static const uint16_t green[3] = { 0x07E0, 0x03E0, 0x01E0 };
+    static const uint16_t red[3]   = { 0xF800, 0x7800, 0x3800 };
+    const int step = 8;
+    for (int k = 0; k < 3; k++) {
+      if (decisionFlashSide > 0) gfx.fillRect(W - (k + 1) * step, 0, step, H, green[k]);
+      else                       gfx.fillRect(k * step, 0, step, H, red[k]);
+    }
   }
 }
 
@@ -1614,8 +1629,11 @@ void loop() {
     if (uiState != UI_NORMAL) {
       handleModalGesture(ev);
     } else if (inPrompt) {
-      if      (ev.kind == GESTURE_SWIPE_RIGHT) mockApprove();
-      else if (ev.kind == GESTURE_SWIPE_LEFT)  mockDeny();
+      if (ev.kind == GESTURE_SWIPE_RIGHT) {
+        decisionFlashSide = 1; decisionFlashUntil = now + 600; mockApprove();
+      } else if (ev.kind == GESTURE_SWIPE_LEFT) {
+        decisionFlashSide = -1; decisionFlashUntil = now + 600; mockDeny();
+      }
     } else if (displayMode == DISP_NORMAL) {
       // Up/down cycle the home views (down = forward, up = back). Menu now
       // opens on BOOT long only.
