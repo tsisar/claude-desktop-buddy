@@ -108,13 +108,15 @@ static UiState uiState = UI_NORMAL;
 //   NORMAL → buddy + HUD (and clock face when conditions match)
 //   PET    → 2 pages: stats / how-to
 //   INFO   → 6 pages: ABOUT / BUTTONS / CLAUDE / DEVICE / BLUETOOTH / CREDITS
-// Cycled with swipe-down or BOOT short (when at home). Pagination inside
+//   TRANSCRIPT → full-screen scrollable log (tap the HUD to open; not cycled)
+// NORMAL/PET/INFO cycle with swipe-up/down or BOOT short. Pagination inside
 // PET/INFO via swipe-left/right or PWRON-short/BOOT-short.
 enum DispMode {
   DISP_NORMAL = 0,
   DISP_PET,
   DISP_INFO,
   DISP_COUNT,
+  DISP_TRANSCRIPT,   // full-screen log; reached by tapping the HUD, not cycled
 };
 static DispMode displayMode = DISP_NORMAL;
 static uint8_t  petPage  = 0;
@@ -160,8 +162,7 @@ static uint32_t  oneShotUntil  = 0;
 static uint32_t  promptArrivedMs = 0;
 static char      lastPromptId[40] = "";
 static bool      responseSent  = false;
-static uint8_t   msgScroll     = 0;
-static uint16_t  lastLineGen   = 0;
+static uint8_t   tScroll       = 0;   // transcript view: lines scrolled back from the tail
 
 // ── auto-behaviours (3i.5) ─────────────────────────────────────────────────
 static uint32_t lastInteractMs    = 0;   // any input or prompt arrival
@@ -260,15 +261,14 @@ static const int HUD_ROWS   = 3;
 static const int HUD_ROW_PX = 18;
 static const int HUD_WIDTH  = 36;
 
+// Home HUD: a compact, always-live tail of the transcript — the latest
+// HUD_ROWS wrapped lines, newest at the bottom in white, older greyed. No
+// manual scrolling here; tapping the strip opens the full-screen log
+// (DISP_TRANSCRIPT) where history can be browsed.
 static void drawHUD() {
   gfx.fillRect(0, HUD_TOP, W, H - HUD_TOP, 0x0000);
   gfx.drawFastHLine(0, HUD_TOP, W, 0x4208);
   gfx.setTextSize(2);
-
-  if (tama.lineGen != lastLineGen) {
-    msgScroll = 0;
-    lastLineGen = tama.lineGen;
-  }
 
   if (tama.nLines == 0) {
     gfx.setTextColor(0xC618, 0x0000);
@@ -285,24 +285,74 @@ static void drawHUD() {
     for (uint8_t j = 0; j < got; j++) srcOf[nDisp + j] = i;
     nDisp += got;
   }
-  uint8_t maxBack = (nDisp > HUD_ROWS) ? (nDisp - HUD_ROWS) : 0;
-  if (msgScroll > maxBack) msgScroll = maxBack;
-
-  int end = (int)nDisp - msgScroll;
-  int start = end - HUD_ROWS; if (start < 0) start = 0;
+  int start = (int)nDisp - HUD_ROWS; if (start < 0) start = 0;
   uint8_t newest = tama.nLines - 1;
-  for (int i = 0; start + i < end; i++) {
+  for (int i = 0; start + i < (int)nDisp; i++) {
     uint8_t row = start + i;
-    bool fresh = (srcOf[row] == newest) && (msgScroll == 0);
+    bool fresh = (srcOf[row] == newest);
     gfx.setTextColor(fresh ? 0xFFFF : 0x8C71, 0x0000);
     gfx.setCursor(10, HUD_TOP + 12 + i * HUD_ROW_PX);
     gfx.print(disp[row]);
   }
-  if (msgScroll > 0) {
-    gfx.setTextColor(0xFFE0, 0x0000);
-    gfx.setCursor(W - 60, HUD_TOP + 12);
-    gfx.printf("-%u", msgScroll);
+}
+
+// Full-screen transcript log. Newest line at the bottom (chat order); the
+// tail is "live" (tScroll == 0). Swipe up = older, swipe down = newer, tap
+// closes back to home. Reached by tapping the home HUD.
+static const int TRANS_TOP  = 54;
+static const int TRANS_ROWS = (H - TRANS_TOP - 28) / HUD_ROW_PX;
+
+static void drawTranscript() {
+  gfx.fillSprite(0x0000);
+  gfx.setTextSize(3);
+  gfx.setTextColor(0xFFFF, 0x0000);
+  gfx.setCursor(10, 12); gfx.print("LOG");
+  gfx.setTextSize(2);
+  gfx.setTextColor(0x07E0, 0x0000);
+  gfx.setTextDatum(TR_DATUM);
+  gfx.drawString("swipe ^ = close", W - 10, 18);
+  gfx.setTextDatum(TL_DATUM);
+  gfx.drawFastHLine(0, 44, W, 0x4208);
+
+  gfx.setTextSize(2);
+  if (tama.nLines == 0) {
+    gfx.setTextColor(0xC618, 0x0000);
+    gfx.setCursor(10, TRANS_TOP); gfx.print(tama.msg);
+    return;
   }
+
+  static char disp[96][48];
+  static uint8_t srcOf[96];
+  uint8_t nDisp = 0;
+  for (uint8_t i = 0; i < tama.nLines && nDisp < 96; i++) {
+    uint8_t got = wrapInto(tama.lines[i], &disp[nDisp], 96 - nDisp, HUD_WIDTH);
+    for (uint8_t j = 0; j < got; j++) srcOf[nDisp + j] = i;
+    nDisp += got;
+  }
+  uint8_t maxBack = (nDisp > TRANS_ROWS) ? (nDisp - TRANS_ROWS) : 0;
+  if (tScroll > maxBack) tScroll = maxBack;
+
+  int end = (int)nDisp - tScroll;
+  int start = end - TRANS_ROWS; if (start < 0) start = 0;
+  uint8_t newest = tama.nLines - 1;
+  for (int i = 0; start + i < end; i++) {
+    uint8_t row = start + i;
+    bool fresh = (srcOf[row] == newest) && (tScroll == 0);
+    gfx.setTextColor(fresh ? 0xFFFF : 0xC618, 0x0000);
+    gfx.setCursor(10, TRANS_TOP + i * HUD_ROW_PX);
+    gfx.print(disp[row]);
+  }
+
+  gfx.setTextDatum(BC_DATUM);
+  if (tScroll > 0) {
+    gfx.setTextColor(0xFFE0, 0x0000);
+    char b[28]; snprintf(b, sizeof(b), "-%u   swipe v = older", tScroll);
+    gfx.drawString(b, W / 2, H - 6);
+  } else {
+    gfx.setTextColor(0x07E0, 0x0000);
+    gfx.drawString("LIVE   swipe v = older", W / 2, H - 6);
+  }
+  gfx.setTextDatum(TL_DATUM);
 }
 
 static void drawBatteryWidget(int bx, int by);   // body lives further down
@@ -641,7 +691,7 @@ static void drawInfoButtons() {
   k(0xFFFF, "swipe >",       "approve");
   k(0xFFFF, "swipe <",       "deny");
   k(0xFFFF, "swipe </>",     "change pet");
-  k(0xFFFF, "tap HUD",       "scroll log");
+  k(0xFFFF, "tap HUD",       "open log");
   k(0xFFFF, "swipe v",       "next view");
   k(0xFFFF, "swipe ^",       "prev view");
   y += 10;
@@ -1550,8 +1600,18 @@ void loop() {
       } else if (ev.kind == GESTURE_SWIPE_LEFT) {
         cycleSpecies(-1); beep(1800, 30);
       } else if (ev.kind == GESTURE_TAP && ev.y >= HUD_TOP) {
-        msgScroll = (msgScroll >= 30) ? 0 : msgScroll + 1;
-        beep(1800, 30);
+        // Tap the transcript strip → open the full-screen log.
+        displayMode = DISP_TRANSCRIPT; tScroll = 0; beep(1800, 30);
+      }
+    } else if (displayMode == DISP_TRANSCRIPT) {
+      // Full-screen log: swipe up (or tap) closes — same as dismissing a
+      // menu. Swipe down scrolls back into history (older lines). Reopening
+      // always lands back at the live tail.
+      const uint8_t step = (TRANS_ROWS > 1) ? TRANS_ROWS - 1 : 1;
+      if      (ev.kind == GESTURE_SWIPE_UP || ev.kind == GESTURE_TAP) {
+        displayMode = DISP_NORMAL; beep(1800, 30);
+      } else if (ev.kind == GESTURE_SWIPE_DOWN) {
+        tScroll += step; beep(1800, 20);
       }
     } else if (displayMode == DISP_PET) {
       if      (ev.kind == GESTURE_SWIPE_DOWN) {
@@ -1599,6 +1659,7 @@ void loop() {
   else if (blePasskey())             drawPasskey();
   else if (xferActive())             drawXferProgress();
   else if (clocking)                 drawClock();
+  else if (displayMode == DISP_TRANSCRIPT) drawTranscript();
   else if (displayMode == DISP_PET)  drawPet();
   else if (displayMode == DISP_INFO) drawInfo(btName);
   else                               drawHome();

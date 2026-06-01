@@ -59,7 +59,9 @@ Everything that used to be M5's A/B buttons is touch-based now.
 | **swipe down**           | any modal       | Step back one level                                                |
 | **tap on row**           | menu / settings / reset | Activate that row                                          |
 | **tap outside panel**    | menu / settings / reset | Close current modal                                        |
-| **tap on HUD area**      | home (no prompt)| Scroll the transcript back one line (`-N` indicator appears)       |
+| **tap on HUD area**      | home (no prompt)| Open the full-screen log                                           |
+| **swipe down**           | log             | Scroll back into older history                                    |
+| **swipe up / tap**       | log             | Close back to home                                                |
 
 ## Physical buttons
 

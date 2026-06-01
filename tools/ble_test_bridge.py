@@ -113,10 +113,15 @@ class FakeBridge:
     async def scenario_working(self):
         i = 0
         msgs = ["reading repo", "running tests", "drafting PR", "thinking"]
+        history = []
         while True:
             self.tokens += 800
             self.tokens_today += 800
-            entries = [f"line {max(0, i-2)}", f"line {max(0, i-1)}", f"line {i}"]
+            history.append(f"line {i}: {msgs[i % len(msgs)]}")
+            # Roll a longer backlog so the full-screen log has history to
+            # scroll. Device keeps the last TAMA_MAX_LINES (16); send a few
+            # under that.
+            entries = history[-14:]
             await self.heartbeat(
                 total=3, running=3, waiting=0,
                 msg=msgs[i % len(msgs)],

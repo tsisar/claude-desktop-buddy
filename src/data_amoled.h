@@ -15,6 +15,11 @@
 // Header-only with file-static state: include from exactly one translation
 // unit. Including twice will trip duplicate-symbol link errors.
 
+// Transcript backlog the device retains. The home HUD only shows the last
+// few; the full-screen log view scrolls the whole buffer, so keep enough for
+// a useful history without blowing the static footprint (N * 92 bytes).
+static const uint8_t TAMA_MAX_LINES = 16;
+
 struct TamaState {
   uint8_t  sessionsTotal;
   uint8_t  sessionsRunning;
@@ -24,7 +29,7 @@ struct TamaState {
   uint32_t lastUpdated;
   char     msg[24];
   bool     connected;
-  char     lines[8][92];
+  char     lines[TAMA_MAX_LINES][92];
   uint8_t  nLines;
   uint16_t lineGen;          // bumps when lines change — lets UI reset scroll
   char     promptId[40];     // pending permission request ID; empty = no prompt
@@ -186,7 +191,7 @@ static void _applyJson(const char* line, TamaState* out) {
   if (!la.isNull()) {
     uint8_t n = 0;
     for (JsonVariant v : la) {
-      if (n >= 8) break;
+      if (n >= TAMA_MAX_LINES) break;
       const char* s = v.as<const char*>();
       _asciiCopy(out->lines[n], sizeof(out->lines[n]), s ? s : "");
       n++;
