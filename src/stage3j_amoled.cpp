@@ -36,6 +36,7 @@
 #include "hal/imu.h"
 #include "hal/rtc.h"
 #include "hal/touch.h"
+#include "hal/storage.h"
 #include "ble_bridge.h"
 #include "data_amoled.h"   // pulls in stats.h
 #include "buddy.h"
@@ -662,6 +663,23 @@ static void drawInfoDevice() {
 
   float t = imuTemp();
   if (!isnan(t)) { snprintf(b, sizeof(b), "%dC", (int)t); kv("imu temp", b); }
+
+  // Storage backend + free space. SD reports in MB (gigabyte cards), LFS
+  // in KB (a few MB partition).
+  uint64_t tot = storageTotalBytes(), used = storageUsedBytes();
+  if (tot > 0) {
+    uint64_t free = tot - used;
+    if (storageBackend() == STORAGE_SD) {
+      snprintf(b, sizeof(b), "%s %lluMB", storageBackendName(),
+               (unsigned long long)(free / (1024ULL * 1024ULL)));
+    } else {
+      snprintf(b, sizeof(b), "%s %uKB", storageBackendName(),
+               (unsigned)(free / 1024));
+    }
+  } else {
+    snprintf(b, sizeof(b), "%s", storageBackendName());
+  }
+  kv("storage", b);
 }
 
 static void drawInfoBluetooth(const char* btName) {
@@ -1240,6 +1258,7 @@ void setup() {
   rtcInit(Wire);
   audioInit(Wire);
   touchInit(Wire);
+  storageInit();   // SD if available, else LittleFS — for xfer.h (Stage 4c)
   pinMode(BOOT_BTN, INPUT_PULLUP);   // physical menu cursor (3i.3)
 
   statsLoad();
