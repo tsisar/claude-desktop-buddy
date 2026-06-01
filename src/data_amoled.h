@@ -83,23 +83,72 @@ inline bool dataRtcValid() { return _rtcValid; }
 // the inline definition in the single .cpp that includes xfer_amoled.h.
 bool xferCommand(JsonDocument& doc);
 
-// Copy a possibly-UTF-8 string into an ASCII-only buffer for the 6×8
-// hardware font. Printable ASCII passes through; control bytes are
-// dropped; one '?' is emitted per UTF-8 codepoint (start byte ≥0xC0),
-// continuation bytes (10xxxxxx) are swallowed silently. Result: Cyrillic
-// "Привіт" → "??????" rather than a mojibake mess. Same treatment for
-// emoji and other non-Latin scripts.
+// Raw copy: UTF-8 passes through unchanged; just strip control bytes and
+// cap the destination length. Stage 4d's u8g2_font_6x12_t_cyrillic is set
+// on the print pipeline, so Cyrillic, Latin, and assorted symbols render
+// directly without transliteration. Emoji + CJK still come out as the
+// font's missing-glyph box because the font doesn't cover them, but
+// that's a font issue, not a copy issue.
+//
+// The legacy "ascii" name is kept because the call sites already use it
+// and the renaming churn isn't worth the diff.
+#if 0   // legacy transliteration table — kept for reference, no longer used.
+static const char* _cyrillicTranslit(uint32_t cp) {
+  switch (cp) {
+    // Russian uppercase A..Я
+    case 0x0410: return "A";    case 0x0411: return "B";
+    case 0x0412: return "V";    case 0x0413: return "H";   // Г → H (UA) / G (RU)
+    case 0x0414: return "D";    case 0x0415: return "E";
+    case 0x0416: return "Zh";   case 0x0417: return "Z";
+    case 0x0418: return "I";    case 0x0419: return "Y";
+    case 0x041A: return "K";    case 0x041B: return "L";
+    case 0x041C: return "M";    case 0x041D: return "N";
+    case 0x041E: return "O";    case 0x041F: return "P";
+    case 0x0420: return "R";    case 0x0421: return "S";
+    case 0x0422: return "T";    case 0x0423: return "U";
+    case 0x0424: return "F";    case 0x0425: return "Kh";
+    case 0x0426: return "Ts";   case 0x0427: return "Ch";
+    case 0x0428: return "Sh";   case 0x0429: return "Shch";
+    case 0x042A: return "'";    case 0x042B: return "Y";
+    case 0x042C: return "'";    case 0x042D: return "E";
+    case 0x042E: return "Yu";   case 0x042F: return "Ya";
+    // Lowercase
+    case 0x0430: return "a";    case 0x0431: return "b";
+    case 0x0432: return "v";    case 0x0433: return "h";
+    case 0x0434: return "d";    case 0x0435: return "e";
+    case 0x0436: return "zh";   case 0x0437: return "z";
+    case 0x0438: return "i";    case 0x0439: return "y";
+    case 0x043A: return "k";    case 0x043B: return "l";
+    case 0x043C: return "m";    case 0x043D: return "n";
+    case 0x043E: return "o";    case 0x043F: return "p";
+    case 0x0440: return "r";    case 0x0441: return "s";
+    case 0x0442: return "t";    case 0x0443: return "u";
+    case 0x0444: return "f";    case 0x0445: return "kh";
+    case 0x0446: return "ts";   case 0x0447: return "ch";
+    case 0x0448: return "sh";   case 0x0449: return "shch";
+    case 0x044A: return "'";    case 0x044B: return "y";
+    case 0x044C: return "'";    case 0x044D: return "e";
+    case 0x044E: return "yu";   case 0x044F: return "ya";
+    // Ukrainian-specific
+    case 0x0404: return "Ye";   case 0x0454: return "ye";
+    case 0x0406: return "I";    case 0x0456: return "i";
+    case 0x0407: return "Yi";   case 0x0457: return "yi";
+    case 0x0490: return "G";    case 0x0491: return "g";
+    // Yo (used in RU)
+    case 0x0401: return "Yo";   case 0x0451: return "yo";
+    default:     return nullptr;
+  }
+}
+#endif
+
 static void _asciiCopy(char* dst, size_t dstLen, const char* src) {
   if (!dstLen) return;
   size_t j = 0;
   for (size_t i = 0; src[i] && j < dstLen - 1; i++) {
     unsigned char c = (unsigned char)src[i];
-    if (c >= 0x20 && c < 0x7F) {
-      dst[j++] = (char)c;
-    } else if (c >= 0xC0) {           // UTF-8 codepoint start byte
-      dst[j++] = '?';
-    }
-    // else: control or UTF-8 continuation → drop
+    // Strip control bytes (< 0x20), pass everything else through verbatim.
+    // Multi-byte UTF-8 sequences ride along — the printer decodes them.
+    if (c >= 0x20) dst[j++] = (char)c;
   }
   dst[j] = 0;
 }

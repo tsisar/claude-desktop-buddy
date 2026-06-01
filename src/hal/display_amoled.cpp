@@ -96,3 +96,11 @@ void Surface::drawString(const char* s, int16_t x, int16_t y) {
 }
 
 void Surface::setBrightness(uint8_t b) { if (_pnl) _pnl->setBrightness(b); }
+
+void Surface::setFont(const uint8_t* u8g2Font) {
+  if (_cv) _cv->setFont(u8g2Font);
+}
+
+void Surface::setUTF8Print(bool enable) {
+  if (_cv) _cv->setUTF8Print(enable);
+}

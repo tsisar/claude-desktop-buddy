@@ -32,6 +32,7 @@
 #include "board_pins.h"
 #include "hal/display.h"
 #include "hal/power.h"
+#include "fonts/u8g2_font_6x12_t_cyrillic.h"
 #include "hal/audio.h"
 #include "hal/imu.h"
 #include "hal/rtc.h"
@@ -1337,6 +1338,13 @@ void setup() {
   Wire.begin(IIC_SDA, IIC_SCL, 400000);
   powerInit(Wire);
   dispOk = gfx.begin();
+  if (dispOk) {
+    // u8g2 6×12 font with Cyrillic coverage + UTF-8 decode on the print
+    // pipeline. Letters from heartbeat msg / transcript / promptHint now
+    // render as actual Cyrillic glyphs instead of '?'.
+    gfx.setUTF8Print(true);
+    gfx.setFont(u8g2_font_6x12_t_cyrillic);
+  }
   imuInit(Wire);
   rtcInit(Wire);
   audioInit(Wire);

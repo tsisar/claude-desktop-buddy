@@ -81,6 +81,14 @@ public:
   // Datum-aware string draw (TFT_eSPI semantics; Arduino_GFX lacks this).
   void drawString(const char* s, int16_t x, int16_t y);
 
+  // U8g2 font support — pass a u8g2 font byte array (Adafruit GFXfont
+  // overload also exists in Arduino_GFX, this one is the u8g2 path).
+  // Set null to fall back to the built-in 6×8 ASCII font.
+  void setFont(const uint8_t* u8g2Font);
+  // Tell the GFX print() pipeline to decode UTF-8 multi-byte sequences
+  // and look the codepoints up in the active font. Default off (ASCII).
+  void setUTF8Print(bool enable);
+
   // Panel-level (not on the canvas in TFT_eSPI, but handy): 0..255.
   void setBrightness(uint8_t b);
 
