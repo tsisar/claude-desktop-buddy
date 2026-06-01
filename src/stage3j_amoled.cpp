@@ -427,13 +427,14 @@ static void drawApproval() {
   gfx.fillRect(0, cardTop, W, H - cardTop, 0x0000);   // mask any buddy bleed
   gfx.drawFastHLine(0, cardTop, W, 0x4208);
 
-  // Timer line.
+  // "approve? Ns" countdown — centred just above the divider, below the buddy.
   uint32_t waited = (millis() - promptArrivedMs) / 1000;
-  gfx.setTextDatum(TC_DATUM);
   gfx.setTextSize(2);
   gfx.setTextColor(waited >= 10 ? 0xFA20 : 0xC618, 0x0000);
+  gfx.setTextDatum(BC_DATUM);
   char top[24]; snprintf(top, sizeof(top), "approve?  %lus", (unsigned long)waited);
-  gfx.drawString(top, W / 2, cardTop + 8);
+  gfx.drawString(top, W / 2, cardTop - 4);
+  gfx.setTextDatum(TL_DATUM);
 
   // Tool name — largest size whose pixel width fits, truncated with '~' if
   // even the smallest won't (avoids the off-screen wrap that garbled it).
@@ -453,8 +454,8 @@ static void drawApproval() {
   }
   gfx.setTextColor(0xFFFF, 0x0000);
   gfx.setTextSize(toolSize);
-  gfx.drawString(toolBuf, W / 2, cardTop + 30);
   gfx.setTextDatum(TL_DATUM);
+  gfx.drawString(toolBuf, 10, cardTop + 14);   // left-aligned with the hint
 
   // Hint — up to 2 lines, wrapped to the width that actually fits.
   gfx.setTextSize(2);
@@ -463,7 +464,7 @@ static void drawApproval() {
   const int hintCols = (W - 20) / (6 * 2);
   uint8_t hn = wrapInto(tama.promptHint, hintLines, 6, hintCols);
   for (uint8_t i = 0; i < hn && i < 2; i++) {
-    gfx.setCursor(10, cardTop + 60 + i * 18);
+    gfx.setCursor(10, cardTop + 50 + i * 18);
     gfx.print(hintLines[i]);
   }
 
