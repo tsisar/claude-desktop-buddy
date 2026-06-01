@@ -43,18 +43,18 @@
 #include "buddy_common.h"
 #include "gesture.h"
 
-// Character renderer is stubbed until Stage 4d. xfer_amoled.h needs
-// characterClose() / characterInit() callable, so they live here as
-// no-ops for now. gifAvailable + buddyMode globals are also referenced
-// from xfer (extern declarations there).
-bool buddyMode    = true;    // ASCII species mode by default
-bool gifAvailable = false;   // becomes true after characterInit() succeeds
-void characterClose() {}
-bool characterInit(const char*) { return false; }
+// gifAvailable / buddyMode globals — xfer_amoled.h references both via
+// extern, and the home render path below picks between buddyTick() and
+// characterTick() based on them.
+bool buddyMode    = true;    // ASCII species mode is the boot default
+bool gifAvailable = false;   // flipped to true when characterInit succeeds
 
-#include "xfer_amoled.h"   // defines xferCommand(), used by data_amoled.h
+#include "character.h"      // characterInit/Close/Tick/SetState/Loaded
+#include "xfer_amoled.h"    // xferCommand() — calls characterInit on char_end
 
-static Surface gfx;
+// Non-static so character_amoled.cpp can reach it via extern. Everything
+// else in this file still treats it as private.
+Surface gfx;
 static bool dispOk = false;
 static const int W = LCD_WIDTH, H = LCD_HEIGHT;
 
@@ -339,7 +339,14 @@ static void drawXferProgress() {
 
 static void drawHome() {
   gfx.fillSprite(0x0000);
-  buddyTick(activeState);   // species pulled from buddy_amoled.cpp registry
+  if (gifAvailable && !buddyMode && characterLoaded()) {
+    // GIF character mode — push the buddy state into the renderer and
+    // let it decode the next frame for the current persona.
+    characterSetState(activeState);
+    characterTick();
+  } else {
+    buddyTick(activeState);   // ASCII species path
+  }
   drawHUD();
   drawBatteryWidget(W - 12 - 14, 14);   // top-right, alongside the buddy
 }
@@ -972,8 +979,14 @@ static void drawSettingsMenu() {
       case 4: boolish = true; boolval = s.led;   break;
       case 5: boolish = true; boolval = s.hud;   break;
       case 6: value = ROT_NAMES[s.clockRot < 3 ? s.clockRot : 0]; break;
-      case 7: snprintf(buf, sizeof(buf), "%u/%u",
-                       buddySpeciesIdx() + 1, buddySpeciesCount()); value = buf; break;
+      case 7: {
+        // tri-state cycle: ASCII species 0..N-1 → GIF (if installed) → 0
+        uint8_t total = buddySpeciesCount() + (gifAvailable ? 1 : 0);
+        uint8_t pos   = buddyMode ? buddySpeciesIdx() + 1 : total;
+        snprintf(buf, sizeof(buf), "%u/%u", pos, total);
+        value = buf;
+        break;
+      }
       // 8/reset and 9/back have no value column
     }
     uint16_t valueCol = 0x07E0;
@@ -996,9 +1009,23 @@ static void applySettings(int idx) {
     case 5: s.hud   = !s.hud;   break;
     case 6: s.clockRot = (s.clockRot + 1) % 3; break;
     case 7:
-      // Cycle through the 18 species; buddy_amoled.cpp persists the new
-      // index to NVS, so the choice survives a reboot.
-      buddyNextSpecies();
+      // tri-state cycle: ASCII species 0..N-1 → GIF (if installed) → 0
+      if (gifAvailable) {
+        if (!buddyMode) {
+          // currently on GIF — drop back to ASCII species 0
+          buddyMode = true;
+          buddySetSpeciesIdx(0);
+          speciesIdxSave(0);
+        } else if (buddySpeciesIdx() + 1 >= buddySpeciesCount()) {
+          // last ASCII species — flip to GIF
+          buddyMode = false;
+          speciesIdxSave(0xFF);   // sentinel "use GIF" on boot
+        } else {
+          buddyNextSpecies();
+        }
+      } else {
+        buddyNextSpecies();
+      }
       return;
     case 8:   // reset → open reset sub-menu
       enterState(UI_MENU_RESET);
@@ -1321,6 +1348,15 @@ void setup() {
   settingsLoad();
   petNameLoad();
   buddyInit();   // pulls saved species index from NVS (defaults to 0)
+  // Scan /characters/ for an installed pack. If one's there, mark it
+  // available; if the saved species was the 0xFF sentinel, boot into GIF
+  // mode straight away. Otherwise stay on the ASCII species the user
+  // last picked.
+  if (characterInit(nullptr)) {
+    gifAvailable = true;
+    uint8_t saved = speciesIdxLoad();
+    if (saved == 0xFF) buddyMode = false;
+  }
   applyBrightness();
   lastInteractMs = millis();   // arm the auto-screen-off countdown from boot
 
