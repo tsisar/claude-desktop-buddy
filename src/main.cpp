@@ -366,6 +366,7 @@ static void drawTranscript() {
 }
 
 static void drawBatteryWidget(int bx, int by);   // body lives further down
+static void drawClockWidget(int x, int y);       // body near drawBatteryWidget
 
 // Install progress card: shown over the buddy while xfer.h is mid-transfer.
 // Replaces the buddy view so the user knows they should leave the desktop
@@ -415,6 +416,7 @@ static void drawHome() {
   }
   if (settings().hud) drawHUD();   // "transcript" setting gates the HUD
   drawBatteryWidget(W - 14 - 14 - SAFE, 14 + SAFE);   // top-right, alongside the buddy
+  drawClockWidget(SAFE + 2, 14 + SAFE + 17);          // top-left, mirrors the battery
 }
 
 // ── approval screen (3i.2) ─────────────────────────────────────────────────
@@ -431,6 +433,7 @@ static void drawApproval() {
     buddyTick(P_ATTENTION);
   }
   drawBatteryWidget(W - 14 - 14 - SAFE, 14 + SAFE);   // top-right, same as home
+  drawClockWidget(SAFE + 2, 14 + SAFE + 17);          // top-left, mirrors the battery
 
   // ── approval card (bottom third) ──
   const int cardTop = 296;
@@ -545,6 +548,22 @@ static void drawBatteryWidget(int bx, int by) {
   gfx.setTextDatum(TL_DATUM);
 }
 
+// Clock widget: HH:MM in the top-left corner, mirroring the battery widget on
+// the right. (x,y) is the middle-left anchor — same baseline as the battery %.
+// Only shown once the RTC holds a real (bridge-synced) time, so we never flash
+// a cold-boot 00:00. Gated by the same "battery" setting that hides its twin.
+static void drawClockWidget(int x, int y) {
+  if (!settings().battery) return;
+  RtcTime tm;
+  if (!dataRtcValid() || !rtcGetTime(&tm)) return;
+  char hm[6]; snprintf(hm, sizeof(hm), "%02u:%02u", tm.Hours, tm.Minutes);
+  gfx.setTextSize(2);
+  gfx.setTextColor(0xFFFF, 0x0000);
+  gfx.setTextDatum(ML_DATUM);
+  gfx.drawString(hm, x, y);
+  gfx.setTextDatum(TL_DATUM);
+}
+
 // Shown when on USB power, no live work, no prompt, no menu, and the RTC
 // has been time-synced by the bridge. Replaces the home view entirely
 // (buddy peek is dropped for stage 3i.4 — full-screen clock is plenty for
@@ -646,9 +665,9 @@ static void drawPetStats() {
   }
   y += 40;
 
-  // Level badge.
-  gfx.fillRoundRect(10, y, 90, 32, 6, 0xA01F);
-  gfx.setTextColor(0xFFFF, 0xA01F);
+  // Level badge — Claude orange (#DE7643 ≈ RGB565 0xDBA8).
+  gfx.fillRoundRect(10, y, 90, 32, 6, 0xDBA8);
+  gfx.setTextColor(0xFFFF, 0xDBA8);
   gfx.setCursor(20, y + 8); gfx.printf("Lv %u", stats().level);
   y += 48;
 
