@@ -82,6 +82,11 @@ The screen auto-powers-off after 30s of no interaction (kept on while an
 approval prompt is up). Any button press wakes it.
 
 ## ASCII pets
+```
+  ▐▛███▜▌
+ ▝▜█████▛▘
+   ▘▘ ▝▝
+```
 
 Eighteen pets, each with seven animations (sleep, idle, busy, attention,
 celebrate, dizzy, heart). Menu → "next pet" cycles them with a counter.
@@ -170,3 +175,15 @@ tools/           — generators and converters
 The BLE API is only available when the desktop apps are in developer mode
 (**Help → Troubleshooting → Enable Developer Mode**). It's intended for
 makers and developers and isn't an officially supported product feature.
+
+## Palette
+
+Brand accent — the Claude terracotta orange, sampled from the desktop UI:
+
+| Name          | HEX       | RGB            | RGB565 (display) |
+| ------------- | --------- | -------------- | ---------------- |
+| Claude orange | `#DE7643` | `222, 118, 67` | `0xDBA8`         |
+
+The display HAL works in 16-bit RGB565, so use `0xDBA8` in `gfx.*` calls
+(`#DE7643` is the 24-bit source). Currently used for the **level badge**;
+reserved as the primary accent for UI styling.

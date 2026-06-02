@@ -199,7 +199,3 @@ clears the stored bond), or send `{"cmd":"unpair"}` from the bridge.
 | Custom GIF didn't appear after push    | `char_end ok=false` means the pack landed but parsing failed — check manifest.json |
 | Can't pair                             | Factory reset clears the stored bond, then re-pair fresh             |
 | Hard power-off                         | Hold the PWRON button for ~6 seconds                                 |
-
- ▐▛███▜▌
-▝▜█████▛▘
-  ▘▘ ▝▝
