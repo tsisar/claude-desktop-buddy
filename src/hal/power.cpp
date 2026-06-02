@@ -24,13 +24,17 @@ bool powerInit(TwoWire& w) {
   }
   Serial.printf("[pmu] AXP2101 ok (chipID 0x%02X)\n", pmu.getChipID());
 
-  // Verified on this board: ALDO1=1.8V and ALDO3=3.3V are the AMOLED rails,
-  // left configured-but-off at reset. Enable them at their own default
-  // voltages — never higher — so nothing can be over-volted.
-  pmu.setALDO1Voltage(1800);
-  pmu.enableALDO1();
-  pmu.setALDO3Voltage(3300);
-  pmu.enableALDO3();
+  // DO NOT touch ALDO1/ALDO3 here. Measured AXP2101 power-on defaults on this
+  // board: every rail is already ON at a sane voltage (DC1 3.3V, ALDO1 3.3V,
+  // ALDO2 3.3V, ALDO3 3.0V, ALDO4 1.8V, BLDO1 1.2V, BLDO2 2.8V).
+  //
+  // ALDO1 (default 3.3V) powers the ES8311 audio codec. The old
+  // setALDO1Voltage(1800)+enableALDO1() was the audio-killer: it glitched the
+  // rail AND under-volted the codec to 1.8V, so the speaker stayed silent.
+  // The earlier "ALDO1 = 1.8V AMOLED rail" comment was wrong. Leaving the
+  // rails at their defaults = working audio + working display.
+  //   pmu.setALDO1Voltage(1800); pmu.enableALDO1();   // ← killed audio, removed
+  //   pmu.setALDO3Voltage(3300); pmu.enableALDO3();
 
   // Touch + display + one more line on this board are held in reset by the
   // XCA9554 expander at 0x20 (verified vs. the vendor 04_GFX_FT3168_Image
@@ -109,6 +113,27 @@ PwronEvent powerPollButton() {
   return ev;
 }
 
+// TODO(audio/display): this is the SECOND audio landmine. ALDO1 powers the
+// ES8311 codec, so disableALDO1() on screen-off (menu "turn off",
+// main.cpp:1035) cuts codec power → audio dies and does NOT recover on wake
+// (codec loses its config; nothing re-inits it). Rework screen on/off to use
+// the SH8601 panel (applyBrightness(0) / display sleep), which is what the
+// auto-idle path already uses — do NOT toggle ALDO1/ALDO3 here.
+// For now it still cuts the rails; fix when reworking the power/display flow.
+//
+// AUDIO INVESTIGATION FINDINGS (so they aren't lost):
+//   • Root cause of "no sound": powerInit's setALDO1Voltage(1800) (above) —
+//     ALDO1 (default 3.3V) feeds the ES8311; lowering/glitching it muted it.
+//   • All AXP rails + charger (4.2V / 150mA / SysPDn 2.6V) are already at the
+//     wanted values by default → the charge/sys setters in powerInit are
+//     redundant no-ops (kept only for cross-unit robustness).
+//   • XCA9554 expander pulse (pins 0/1/2) does NOT affect audio (ruled out).
+//   • ES8311 warm-boot: after a soft reset the codec keeps its powered analog
+//     state and a plain re-init leaves it silent until a hard power-cycle —
+//     es8311_init needs a delay after the 0x1F reset + after 0x80 power-on.
+//   • Verified-audible audio backend = Arduino ESP_I2S (I2SClass) at MCLK x256
+//     (Waveshare 15_ES8311). The current raw ESP-IDF i2s_std x384 path in
+//     audio.cpp is unverified — port/verify the ESP_I2S x256 version.
 void powerSetDisplay(bool on) {
   if (!ok) return;
   if (on) { pmu.enableALDO1();  pmu.enableALDO3();  }
