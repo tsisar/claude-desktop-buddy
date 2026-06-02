@@ -10,11 +10,12 @@
 static XPowersPMU pmu;
 static bool       ok = false;
 
-// Battery charge current. AXP2101 defaults are NOT safe to assume, so we set
-// this explicitly. Rule of thumb: ~0.5C of the cell's capacity. 150mA suits a
-// small (~300mAh) buddy LiPo and is safe-but-slow for anything larger — bump
-// to _300MA / _500MA once the installed cell's capacity is confirmed.
-static constexpr uint8_t CHARGE_CURRENT = XPOWERS_AXP2101_CHG_CUR_150MA;
+// Battery charge current. The installed cell is 350 mAh. LiPo best practice is
+// to charge at ~0.5C for longevity (0.5–1C is the safe band; >1C shortens life,
+// and the vendor's 400 mA / upstream's 500 mA are ~1.1–1.4C here — too hot for
+// this pack). 0.5C of 350 mAh = 175 mA, which the AXP2101 supports exactly.
+// Drop to _150MA for an even cooler/gentler charge; never go above _350MA (1C).
+static constexpr uint8_t CHARGE_CURRENT = XPOWERS_AXP2101_CHG_CUR_175MA;
 
 bool powerInit(TwoWire& w) {
   ok = pmu.begin(w, AXP2101_SLAVE_ADDRESS, IIC_SDA, IIC_SCL);
