@@ -206,6 +206,58 @@ the vendor's 4.1 V / 400 mA as the reference once we re-enable charger config.
 
 ---
 
+## 2d. Schematic-confirmed wiring (docs/ESP32-S3-Touch-AMOLED-1.8.pdf)
+
+The board schematic (single sheet) settles the wiring. AXP2101 rail to net,
+from the schematic's own power-rail table:
+
+| Rail    | Net               | Voltage                |
+|---------|-------------------|------------------------|
+| DCDC1   | VCC3V3            | 3.3 V                  |
+| DCDC2   | (0.9 V)           | 0.9 V                  |
+| DCDC3   | (1.2 V)           | 1.2 V                  |
+| DCDC4   | (1.8 V)           | 1.8 V                  |
+| DCDC5   | NC                | — not connected        |
+| VBAT1   | CHG_BAT           | main battery charge    |
+| VBAT2   | CHG_RTC           | RTC backup-cell charge |
+| ALDO1   | VL1_3.3V (= A3V3) | 3.3 V                  |
+| ALDO2   | VL2_3.3V          | 3.3 V                  |
+| ALDO3   | VL3_3V            | 3.0 V                  |
+| ALDO4   | VL3_1.8V          | 1.8 V                  |
+| BLDO1   | VL_1.2V           | 1.2 V                  |
+| BLDO2   | VL_2.8V           | 2.8 V                  |
+| CPUSLDO | VCL_1.2V          | 1.2 V                  |
+
+Confirmed loads (read off the device blocks on the sheet):
+
+- **ES8311 codec (U9):** AVDD (pin 11) <- R37 (0R) <- A3V3 <- **ALDO1**.
+  DVDD + PVDD (pins 3, 4) <- R35 (0R) <- **VCC3V3 (DC1)**. So the codec's analog
+  rail is ALDO1 (this is why disabling ALDO1 kills audio); its digital/IO rail is
+  DC1.
+- **SH8601 display (FPC U4 AXE534124):** power pins VCI (pin 24) + VDDIO (pin 26),
+  enable DSI_PWR_EN (pin 22). **DSI_PWR_EN = expander EXIO1** (GPIO table). The
+  panel is fed from the 3.3 V system through a switch gated by DSI_PWR_EN — NOT
+  from a dedicated AXP rail. (Vendor disables every ALDO/BLDO and the panel still
+  works, which independently proves this.)
+- **ESP32-S3, touch FT3168, IMU, RTC, SD:** on **VCC3V3 (DC1)**.
+- RTC also has a backup-cell charge rail (VBAT2 / CHG_RTC).
+
+Rails ALDO2/3/4, BLDO1/2, CPUSLDO and DCDC2/3/4 carry net names but the **vendor
+disables them and the board runs fine** -> they feed nothing the firmware needs
+(spare / optional / unpopulated). DCDC5 is NC.
+
+Live map — schematic + vendor + measurement now all agree:
+
+- **DC1 (VCC3V3, 3.3 V)** -> ESP32-S3, display (via DSI_PWR_EN switch), touch,
+  IMU, RTC, SD, and codec DVDD/PVDD.
+- **ALDO1 (A3V3, 3.3 V)** -> codec AVDD.
+- All other rails: off / unused.
+
+Practical upshot: **display on/off = toggle DSI_PWR_EN (EXIO1)**, not an AXP rail.
+**Power-saving = DC1 + ALDO1 on, everything else off** (vendor config, §2c).
+
+---
+
 ## 3. Confirmed device ⇄ rail links
 
 The only proven link so far:
