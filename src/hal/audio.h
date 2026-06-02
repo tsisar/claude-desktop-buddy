@@ -9,21 +9,22 @@ class TwoWire;
 // via the PA_EN pin). audioBeep() synthesizes a short tone and plays it; it's
 // the AMOLED replacement for the M5 build's M5.Beep.tone().
 //
-// NOT YET VERIFIED ON HARDWARE — scaffold only. Compiles; the actual sound
-// (codec init + audible tone) needs an on-device listen test.
+// Playback is non-blocking: audioBeep()/audioClick() enqueue a request that a
+// dedicated FreeRTOS task synthesizes and writes to I2S, so the UI loop never
+// stalls for the length of a tone.
 
 // Bring up the ES8311 codec + I2S. `w` must already be Wire.begin()'d on the
 // shared bus (SDA=15/SCL=14). Returns false if codec init failed.
 bool audioInit(TwoWire& w);
 bool audioOk();
 
-// Play a square-ish tone: `freq` Hz for `ms` milliseconds. Blocking (writes
-// the PCM to I2S and returns when done). No-op if audioInit() failed.
+// Play a sine tone: `freq` Hz for `ms` milliseconds. Non-blocking — queues the
+// request to the audio task and returns immediately. No-op if audioInit() failed.
 void audioBeep(uint16_t freq, uint16_t ms);
 
 // Play a short percussive "click" (key-press feel): a fast-decaying tick whose
 // body pitch is `freq`, with a noisy attack. Much shorter than audioBeep — the
-// UI feedback sound. Blocking; no-op if audioInit() failed.
+// UI feedback sound. Non-blocking; no-op if audioInit() failed.
 void audioClick(uint16_t freq);
 
 // 0..100 output volume (passed to the codec). Call after audioInit().

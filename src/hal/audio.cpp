@@ -3,6 +3,9 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <driver/i2s_std.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
+#include <freertos/task.h>
 #include <math.h>
 
 extern "C" {
@@ -13,6 +16,11 @@ extern "C" {
 // (driver/i2s_std.h) matching Waveshare's 06_I2SCodec example exactly — the
 // Arduino ESP_I2S wrapper hard-codes MCLK ×256 and the codec stayed silent;
 // the vendor example drives MCLK ×384. See audio.h.
+//
+// Playback is non-blocking: audioBeep()/audioClick() just enqueue a request
+// and a dedicated FreeRTOS task synthesizes the PCM and writes it to I2S, so
+// the UI loop never stalls for the duration of a tone. (Pattern borrowed from
+// the upstream esp32 build's beepTask.)
 
 #define AUDIO_RATE   16000           // sample rate (Hz)
 #define MCLK_MULT    384             // MCLK = rate*384 = 6.144MHz (matches vendor)
@@ -21,6 +29,11 @@ extern "C" {
 static i2s_chan_handle_t tx_chan = nullptr;
 static es8311_handle_t   es = nullptr;
 static bool              ok = false;
+
+// ── async playback queue ──────────────────────────────────────────────────
+enum AudioKind : uint8_t { AK_BEEP = 0, AK_CLICK = 1 };
+struct AudioReq { uint8_t kind; uint16_t freq; uint16_t ms; };
+static QueueHandle_t s_q = nullptr;
 
 static size_t i2sWrite(const void* data, size_t bytes) {
   size_t wrote = 0;
@@ -89,56 +102,41 @@ static bool codecInit() {
   if (es8311_init(es, &clk, ES8311_RESOLUTION_16, ES8311_RESOLUTION_16) != ESP_OK) return false;
   es8311_sample_frequency_config(es, clk.mclk_frequency, clk.sample_frequency);
   es8311_microphone_config(es, false);
-  es8311_voice_volume_set(es, 100, nullptr);   // max — debugging audibility
+  es8311_voice_volume_set(es, 68, nullptr);   // max — debugging audibility
   es8311_register_dump(es);                     // DEBUG: dump codec regs to serial
   return true;
 }
 
-bool audioInit(TwoWire& /*w*/) {
-  // Power-amp enable for the speaker.
-  pinMode(AUDIO_PA_EN, OUTPUT);
-  digitalWrite(AUDIO_PA_EN, HIGH);
+// ── synthesis (runs on the audio task) ─────────────────────────────────────
 
-  if (!i2sInit()) return false;
-  // Wire is assumed already begun by the caller (shared bus).
-  ok = codecInit();
-  Serial.printf("[audio] %s\n", ok ? "ES8311 ok" : "ES8311 init FAILED");
-  return ok;
-}
-
-bool audioOk() { return ok; }
-
-void audioSetVolume(uint8_t pct) {
-  if (ok && es) es8311_voice_volume_set(es, pct > 100 ? 100 : pct, nullptr);
-}
-
-void audioBeep(uint16_t freq, uint16_t ms) {
-  if (!ok || freq == 0) return;
+// Smooth sine tone — gentler on the amp than a square wave (less DC/harmonics).
+static void synthBeep(uint16_t freq, uint16_t ms) {
+  if (freq == 0) return;
   const int rate = AUDIO_RATE;
   int samples = (int)((uint32_t)rate * ms / 1000);
   if (samples <= 0) return;
-  const int period = (freq > 0) ? rate / freq : rate;   // samples per cycle
-  const int16_t amp = 6000;                              // ~18% full scale
+  const float amp    = 6000.0f;                      // ~18% full scale
+  const float dphase = 2.0f * (float)M_PI * freq / (float)rate;
+  float phase = 0.0f;
 
   static int16_t buf[256];   // 128 stereo frames per chunk
   int done = 0;
-  size_t wrote = 0;
   while (done < samples) {
     int frames = 0;
     for (; frames < 128 && done < samples; frames++, done++) {
-      int16_t v = ((done / (period / 2 ? period / 2 : 1)) & 1) ? amp : -amp;
+      int16_t v = (int16_t)(amp * sinf(phase));
+      phase += dphase;
+      if (phase > 2.0f * (float)M_PI) phase -= 2.0f * (float)M_PI;
       buf[frames * 2]     = v;   // L
       buf[frames * 2 + 1] = v;   // R
     }
-    wrote += i2sWrite(buf, frames * 2 * sizeof(int16_t));
+    i2sWrite(buf, frames * 2 * sizeof(int16_t));
   }
-  static bool logged = false;
-  if (!logged) { Serial.printf("[audio] beep wrote %u bytes (PA_EN=%d)\n",
-                               (unsigned)wrote, digitalRead(AUDIO_PA_EN)); logged = true; }
 }
 
-void audioClick(uint16_t freq) {
-  if (!ok) return;
+// Short percussive "click" (key-press feel): fast exp decay + noisy attack,
+// body pitch = freq so approve/deny/menu stay distinct.
+static void synthClick(uint16_t freq) {
   if (freq == 0) freq = 2000;
   const int rate = AUDIO_RATE;
   const int ms = 25;                                   // tick (boosted for test)
@@ -168,4 +166,49 @@ void audioClick(uint16_t freq) {
     }
     i2sWrite(buf, frames * 2 * sizeof(int16_t));
   }
+}
+
+static void audioTask(void*) {
+  AudioReq r;
+  while (xQueueReceive(s_q, &r, portMAX_DELAY) == pdTRUE) {
+    if (r.kind == AK_CLICK) synthClick(r.freq);
+    else                    synthBeep(r.freq, r.ms);
+  }
+}
+
+bool audioInit(TwoWire& /*w*/) {
+  // Power-amp enable for the speaker.
+  pinMode(AUDIO_PA_EN, OUTPUT);
+  digitalWrite(AUDIO_PA_EN, HIGH);
+
+  if (!i2sInit()) return false;
+  // Wire is assumed already begun by the caller (shared bus).
+  ok = codecInit();
+  Serial.printf("[audio] %s\n", ok ? "ES8311 ok" : "ES8311 init FAILED");
+  if (!ok) return false;
+
+  // Async playback: one synth task drains the request queue so the UI loop
+  // never blocks for the length of a tone.
+  s_q = xQueueCreate(8, sizeof(AudioReq));
+  if (!s_q) { Serial.println("[audio] queue alloc failed"); ok = false; return false; }
+  xTaskCreatePinnedToCore(audioTask, "audio", 4096, nullptr, 5, nullptr, tskNO_AFFINITY);
+  return true;
+}
+
+bool audioOk() { return ok; }
+
+void audioSetVolume(uint8_t pct) {
+  if (ok && es) es8311_voice_volume_set(es, pct > 100 ? 100 : pct, nullptr);
+}
+
+void audioBeep(uint16_t freq, uint16_t ms) {
+  if (!ok || !s_q || freq == 0) return;
+  AudioReq r{ AK_BEEP, freq, ms };
+  xQueueSend(s_q, &r, 0);          // non-blocking; drop if the queue is full
+}
+
+void audioClick(uint16_t freq) {
+  if (!ok || !s_q) return;
+  AudioReq r{ AK_CLICK, freq, 0 };
+  xQueueSend(s_q, &r, 0);          // non-blocking; drop if the queue is full
 }
