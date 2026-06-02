@@ -8,6 +8,7 @@
 #include "ble_bridge.h"
 #include "stats.h"
 #include "buddy.h"
+#include "debug.h"
 
 // AMOLED port of xfer.h. Same wire protocol as the M5 build (REFERENCE.md):
 // cmd:char_begin / cmd:file / cmd:chunk / cmd:file_end / cmd:char_end,
@@ -48,7 +49,7 @@ static void _xAck(const char* what, bool ok, uint32_t n = 0) {
   int len = snprintf(b, sizeof(b),
     "{\"ack\":\"%s\",\"ok\":%s,\"n\":%lu}\n",
     what, ok ? "true" : "false", (unsigned long)n);
-  Serial.write(b, len);
+  VWRITE(b, len);
   bleWrite((const uint8_t*)b, len);
 }
 
@@ -153,7 +154,7 @@ inline bool xferCommand(JsonDocument& doc) {
       (unsigned long long)fsFree, (unsigned long long)fsTotal,
       stats().approvals, stats().denials, statsMedianVelocity(),
       (unsigned long)stats().napSeconds, stats().level);
-    Serial.write(b, len);
+    VWRITE(b, len);
     bleWrite((const uint8_t*)b, len);
     return true;
   }
@@ -191,7 +192,7 @@ inline bool xferCommand(JsonDocument& doc) {
         (unsigned long long)available,
         (unsigned long)(_xTotal / 1024),
         (unsigned long long)(available / 1024));
-      Serial.write(b, len);
+      VWRITE(b, len);
       bleWrite((const uint8_t*)b, len);
       return true;
     }

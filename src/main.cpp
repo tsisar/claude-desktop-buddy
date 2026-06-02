@@ -43,6 +43,7 @@
 #include "buddy.h"
 #include "buddy_common.h"
 #include "gesture.h"
+#include "debug.h"
 
 // gifAvailable / buddyMode globals — xfer.h references both via
 // extern, and the home render path below picks between buddyTick() and
@@ -65,7 +66,7 @@ static const int SAFE = 4;
 // ── buddy_common.h symbol definitions (Surface backing) ────────────────────
 const int BUDDY_X_CENTER  = W / 2;
 const int BUDDY_CANVAS_W  = W;
-const int BUDDY_Y_BASE    = 40;   // logical; ×SCALE(4) px. Nudged 30→40 = +40 px down.
+const int BUDDY_Y_BASE    = 35;   // logical; ×SCALE(4) px. Nudged 30→35 = +20 px down.
 const int BUDDY_Y_OVERLAY = 6;
 const int BUDDY_CHAR_W    = 6;
 const int BUDDY_CHAR_H    = 8;
@@ -224,7 +225,7 @@ static void beep(uint16_t freq, uint16_t ms) {
 }
 
 static void sendCmd(const char* json) {
-  Serial.println(json);
+  VLOGLN(json);
   size_t n = strlen(json);
   bleWrite((const uint8_t*)json, n);
   bleWrite((const uint8_t*)"\n", 1);
@@ -1582,8 +1583,8 @@ void loop() {
   BootEvent be = pollBoot();
   PwronEvent pw = powerPollButton();
   if (pw != PWRON_NONE || be != BOOT_NONE) {
-    Serial.printf("[3i.5] btn  BOOT=%d PWRON=%d  ui=%d disp=%d\n",
-                  (int)be, (int)pw, (int)uiState, (int)displayMode);
+    VLOG("[3i.5] btn  BOOT=%d PWRON=%d  ui=%d disp=%d\n",
+         (int)be, (int)pw, (int)uiState, (int)displayMode);
     // Any physical press counts as interaction — wake the screen and arm
     // the 30s timeout. PWRON-short's own screen-toggle path still gets to
     // flip screenOn afterwards (toggle wins; wake() doesn't force-on).
@@ -1627,8 +1628,8 @@ void loop() {
   }
 
   if (ev.kind != GESTURE_NONE) {
-    Serial.printf("[3i.5] gesture %u at (%u,%u) d(%d,%d) state=%d\n",
-                  (unsigned)ev.kind, ev.x, ev.y, ev.dx, ev.dy, uiState);
+    VLOG("[3i.5] gesture %u at (%u,%u) d(%d,%d) state=%d\n",
+         (unsigned)ev.kind, ev.x, ev.y, ev.dx, ev.dy, uiState);
     wake();   // any gesture counts as interaction
     if (uiState != UI_NORMAL) {
       handleModalGesture(ev);

@@ -17,6 +17,7 @@
 #include "character.h"
 #include "hal/display.h"
 #include "hal/storage.h"
+#include "debug.h"
 #include <Arduino.h>
 #include <FS.h>
 #include <AnimatedGIF.h>
@@ -307,8 +308,8 @@ void characterSetState(uint8_t s) {
     gifPlace();
     nextFrameAt = 0;
     variantStartedMs = millis();
-    Serial.printf("[char] %s: %dx%d @ (%d,%d) heap=%u\n",
-                  gifPaths[idx], gifW, gifH, gifX, gifY, ESP.getFreeHeap());
+    VLOG("[char] %s: %dx%d @ (%d,%d) heap=%u\n",
+         gifPaths[idx], gifW, gifH, gifX, gifY, ESP.getFreeHeap());
   } else {
     Serial.printf("[char] open failed: %s (err %d)\n", full, gif.getLastError());
   }
