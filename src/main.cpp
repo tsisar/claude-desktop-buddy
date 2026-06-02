@@ -65,7 +65,7 @@ static const int SAFE = 4;
 // ── buddy_common.h symbol definitions (Surface backing) ────────────────────
 const int BUDDY_X_CENTER  = W / 2;
 const int BUDDY_CANVAS_W  = W;
-const int BUDDY_Y_BASE    = 30;
+const int BUDDY_Y_BASE    = 40;   // logical; ×SCALE(4) px. Nudged 30→40 = +40 px down.
 const int BUDDY_Y_OVERLAY = 6;
 const int BUDDY_CHAR_W    = 6;
 const int BUDDY_CHAR_H    = 8;
@@ -179,6 +179,8 @@ static int8_t   faceDownFrames    = 0;   // debounce: enter +15, exit -8
 static bool     napping           = false;
 static uint32_t napStartMs        = 0;
 static uint32_t lastPasskey       = 0;
+static uint32_t lastWakeTapMs     = 0;   // double-tap-to-wake: time of 1st tap
+static const uint32_t DOUBLE_TAP_MS = 400;  // max gap between the two taps
 // Single idle timeout governs both screen-saver behaviours: after this much
 // time with no interaction the home view is "parked" — on USB it becomes the
 // clock face, on battery the panel turns off. Any input (touch / button /
@@ -1034,6 +1036,7 @@ static void applyMainMenu(int idx) {
       // isn't gated by ALDO1/ALDO3 anyway (see docs/device-power-map.md).
       // Full power-off via AXP2101 OFF register is owned by 3i.5.
       screenOn = false;
+      applyBrightness();   // blank the panel immediately (double-tap / PWRON wakes)
       enterState(UI_NORMAL);
       break;
     case 2:   // help → CONTROLS info page
@@ -1611,6 +1614,17 @@ void loop() {
   gestureUpdate();
   GestureEvent ev = gestureGet();
   bool inPrompt = tama.promptId[0] && !responseSent;
+
+  // While blanked, a single stray touch must NOT wake the screen — only a
+  // deliberate double-tap does. Detect it here and consume the event so the
+  // normal dispatch below sees nothing (no UI action leaks through on wake).
+  if (ev.kind != GESTURE_NONE && !screenOn) {
+    if (ev.kind == GESTURE_TAP) {
+      if (now - lastWakeTapMs <= DOUBLE_TAP_MS) { lastWakeTapMs = 0; wake(); }
+      else lastWakeTapMs = now;
+    }
+    ev.kind = GESTURE_NONE;   // swallow everything while off
+  }
 
   if (ev.kind != GESTURE_NONE) {
     Serial.printf("[3i.5] gesture %u at (%u,%u) d(%d,%d) state=%d\n",
