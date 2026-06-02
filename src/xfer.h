@@ -1,9 +1,31 @@
 #pragma once
 #include <Arduino.h>
-#include <LittleFS.h>
-#include "ble_bridge.h"
-#include <mbedtls/base64.h>
+#include <FS.h>
 #include <ArduinoJson.h>
+#include <mbedtls/base64.h>
+#include "hal/storage.h"
+#include "hal/power.h"
+#include "ble_bridge.h"
+#include "stats.h"
+#include "buddy.h"
+
+// AMOLED port of xfer.h. Same wire protocol as the M5 build (REFERENCE.md):
+// cmd:char_begin / cmd:file / cmd:chunk / cmd:file_end / cmd:char_end,
+// plus the housekeeping cmd:status / name / owner / species / unpair.
+//
+// Differences from M5:
+//   • LittleFS replaced by hal/storage.h — files go onto SD if a card is
+//     mounted, otherwise the LittleFS partition. storageFS() gives us a
+//     fs::FS& that both backends inherit from, so this file stays
+//     filesystem-agnostic.
+//   • Battery / VBUS readouts go through hal/power.h instead of M5.Axp.
+//     mA isn't exposed by XPowersLib here, so cmd:status reports 0 for
+//     current. Desktop tolerates the missing field.
+//   • characterClose() / characterInit() are externs — stubbed in main.cpp
+//     until Stage 4d brings the GIF renderer online.
+//
+// Header-only with file-static state — include from EXACTLY ONE
+// translation unit (main.cpp).
 
 static File     _xFile;
 static uint32_t _xExpected = 0, _xWritten = 0;
@@ -11,48 +33,61 @@ static char     _xCharName[24] = "";
 static bool     _xActive = false;
 static uint32_t _xTotal = 0, _xTotalWritten = 0;
 
-// Ack goes to both streams — we don't track which one delivered the command,
-// and writes to a clientless SerialBT just drop. The bridge listens on
-// whichever port it opened.
+// Character renderer hooks — provided by main.cpp (stubs for now, real impl
+// in Stage 4d). Declared as plain functions so the linker can swap the
+// stub for the real implementation without touching this file.
+void characterClose();
+bool characterInit(const char* name);
+
+// Buddy / GIF mode flags — owned by main.cpp.
+extern bool buddyMode;
+extern bool gifAvailable;
+
 static void _xAck(const char* what, bool ok, uint32_t n = 0) {
   char b[64];
-  int len = snprintf(b, sizeof(b), "{\"ack\":\"%s\",\"ok\":%s,\"n\":%lu}\n", what, ok?"true":"false", (unsigned long)n);
+  int len = snprintf(b, sizeof(b),
+    "{\"ack\":\"%s\",\"ok\":%s,\"n\":%lu}\n",
+    what, ok ? "true" : "false", (unsigned long)n);
   Serial.write(b, len);
   bleWrite((const uint8_t*)b, len);
 }
 
+// Recursively remove a directory's contents (one level deep — char packs
+// don't nest). Returns total bytes reclaimed.
 static uint32_t _xWipeDir(const char* dir) {
-  File d = LittleFS.open(dir);
-  if (!d || !d.isDirectory()) { LittleFS.mkdir(dir); return 0; }
+  fs::FS& fs = storageFS();
+  File d = fs.open(dir);
+  if (!d || !d.isDirectory()) { fs.mkdir(dir); return 0; }
   uint32_t freed = 0;
   File f = d.openNextFile();
   while (f) {
     freed += f.size();
-    char p[80];
+    char p[96];
     snprintf(p, sizeof(p), "%s/%s", dir, f.name());
     f.close();
-    LittleFS.remove(p);
+    fs.remove(p);
     f = d.openNextFile();
   }
   d.close();
   return freed;
 }
 
-// Only one character lives on the device at a time. Installing a new one
-// under a different name would otherwise leave the old one's files eating
-// space. Wipe everything under /characters/, return total bytes reclaimed.
+// Wipe everything under /characters/ — only one pack lives on the device
+// at a time, so installing a new pack with a different name would
+// otherwise leak the old one's bytes.
 static uint32_t _xWipeAllChars() {
-  File root = LittleFS.open("/characters");
-  if (!root || !root.isDirectory()) { LittleFS.mkdir("/characters"); return 0; }
+  fs::FS& fs = storageFS();
+  File root = fs.open("/characters");
+  if (!root || !root.isDirectory()) { fs.mkdir("/characters"); return 0; }
   uint32_t freed = 0;
   File sub = root.openNextFile();
   while (sub) {
     if (sub.isDirectory()) {
-      char p[64];
+      char p[80];
       snprintf(p, sizeof(p), "/characters/%s", sub.name());
       sub.close();
       freed += _xWipeDir(p);
-      LittleFS.rmdir(p);
+      fs.rmdir(p);
     } else {
       sub.close();
     }
@@ -61,18 +96,6 @@ static uint32_t _xWipeAllChars() {
   root.close();
   return freed;
 }
-
-// Called from data.h when incoming JSON has a "cmd" key. Returns true if
-// it was a transfer command (caller should skip state-update parsing).
-// Needs characterClose()/characterInit() declared before this include.
-void characterClose();
-bool characterInit(const char* name);
-void petNameSet(const char* name);
-const char* petName();
-void ownerSet(const char* name);
-const char* ownerName();
-#include "stats.h"
-#include <M5StickCPlus.h>
 
 inline bool xferCommand(JsonDocument& doc) {
   const char* cmd = doc["cmd"];
@@ -86,8 +109,6 @@ inline bool xferCommand(JsonDocument& doc) {
   }
 
   if (strcmp(cmd, "species") == 0) {
-    extern bool buddyMode, gifAvailable;
-    extern void buddySetSpeciesIdx(uint8_t);
     uint8_t idx = doc["idx"] | 0xFF;
     speciesIdxSave(idx);
     buddyMode = !(gifAvailable && idx == 0xFF);
@@ -110,29 +131,28 @@ inline bool xferCommand(JsonDocument& doc) {
   }
 
   if (strcmp(cmd, "status") == 0) {
-    // Dump everything the info screens show. Manual printf rather than
-    // ArduinoJson serialize — less heap churn, and the shape is fixed.
-    int vBat = (int)(M5.Axp.GetBatVoltage() * 1000);
-    int iBat = (int)M5.Axp.GetBatCurrent();
-    int vBus = (int)(M5.Axp.GetVBusVoltage() * 1000);
-    int pct = (vBat - 3200) / 10;
-    if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+    // Battery + system telemetry for the desktop's stats panel. mA isn't
+    // exposed by XPowersLib here — report 0; desktop already tolerates
+    // missing fields.
+    int pct  = powerOk() ? batteryPercent()      : 0;
+    int mV   = powerOk() ? batteryMilliVolts()   : 0;
+    bool usb = onUsb();
+    uint64_t fsTotal = storageTotalBytes();
+    uint64_t fsFree  = fsTotal - storageUsedBytes();
     char b[320];
     int len = snprintf(b, sizeof(b),
       "{\"ack\":\"status\",\"ok\":true,\"n\":0,\"data\":{"
       "\"name\":\"%s\",\"owner\":\"%s\",\"sec\":%s,"
-      "\"bat\":{\"pct\":%d,\"mV\":%d,\"mA\":%d,\"usb\":%s},"
-      "\"sys\":{\"up\":%lu,\"heap\":%u,\"fsFree\":%lu,\"fsTotal\":%lu},"
+      "\"bat\":{\"pct\":%d,\"mV\":%d,\"mA\":0,\"usb\":%s},"
+      "\"sys\":{\"up\":%lu,\"heap\":%u,\"fsFree\":%llu,\"fsTotal\":%llu},"
       "\"stats\":{\"appr\":%u,\"deny\":%u,\"vel\":%u,\"nap\":%lu,\"lvl\":%u}"
       "}}\n",
       petName(), ownerName(), bleSecure() ? "true" : "false",
-      pct, vBat, iBat, (vBus > 4000) ? "true" : "false",
+      pct, mV, usb ? "true" : "false",
       millis() / 1000, ESP.getFreeHeap(),
-      (unsigned long)(LittleFS.totalBytes() - LittleFS.usedBytes()),
-      (unsigned long)LittleFS.totalBytes(),
+      (unsigned long long)fsFree, (unsigned long long)fsTotal,
       stats().approvals, stats().denials, statsMedianVelocity(),
-      (unsigned long)stats().napSeconds, stats().level
-    );
+      (unsigned long)stats().napSeconds, stats().level);
     Serial.write(b, len);
     bleWrite((const uint8_t*)b, len);
     return true;
@@ -142,13 +162,13 @@ inline bool xferCommand(JsonDocument& doc) {
     const char* name = doc["name"] | "pet";
     _xTotal = doc["total"] | 0;
 
-    // Fit check: free space after wiping everything under /characters/.
-    // Do the math before touching the filesystem so a failed check leaves
-    // the current character intact.
-    uint32_t free = LittleFS.totalBytes() - LittleFS.usedBytes();
+    // Fit check BEFORE touching the filesystem so a failed sizing leaves
+    // whatever's currently installed intact.
+    uint64_t free       = storageTotalBytes() - storageUsedBytes();
     uint32_t reclaimable = 0;
     {
-      File r = LittleFS.open("/characters");
+      fs::FS& fs = storageFS();
+      File r = fs.open("/characters");
       if (r && r.isDirectory()) {
         File s = r.openNextFile();
         while (s) {
@@ -161,56 +181,88 @@ inline bool xferCommand(JsonDocument& doc) {
         r.close();
       }
     }
-    // Headroom for LittleFS metadata overhead — it's not byte-for-byte.
-    uint32_t available = free + reclaimable;
-    if (_xTotal > 0 && _xTotal + 4096 > available) {
-      char b[96];
+    uint64_t available = free + reclaimable;
+    // 4KB headroom for filesystem metadata — LittleFS isn't byte-for-byte.
+    if (_xTotal > 0 && (uint64_t)_xTotal + 4096 > available) {
+      char b[128];
       int len = snprintf(b, sizeof(b),
-        "{\"ack\":\"char_begin\",\"ok\":false,\"n\":%lu,\"error\":\"need %luK, have %luK\"}\n",
-        (unsigned long)available, (unsigned long)(_xTotal/1024), (unsigned long)(available/1024)
-      );
+        "{\"ack\":\"char_begin\",\"ok\":false,\"n\":%llu,"
+        "\"error\":\"need %luK, have %lluK\"}\n",
+        (unsigned long long)available,
+        (unsigned long)(_xTotal / 1024),
+        (unsigned long long)(available / 1024));
       Serial.write(b, len);
       bleWrite((const uint8_t*)b, len);
       return true;
     }
 
-    strncpy(_xCharName, name, sizeof(_xCharName)-1); _xCharName[sizeof(_xCharName)-1]=0;
+    strncpy(_xCharName, name, sizeof(_xCharName) - 1);
+    _xCharName[sizeof(_xCharName) - 1] = 0;
     characterClose();
     _xWipeAllChars();
-    char dir[48]; snprintf(dir, sizeof(dir), "/characters/%s", _xCharName);
-    LittleFS.mkdir(dir);
+    char dir[48];
+    snprintf(dir, sizeof(dir), "/characters/%s", _xCharName);
+    storageFS().mkdir(dir);
     _xTotalWritten = 0;
     _xActive = true;
     _xAck("char_begin", true);
     return true;
   }
 
-  if (!_xActive) return strcmp(cmd, "permission") != 0;  // permission cmd is not ours
+  // permission isn't ours, but we want to claim every other unknown cmd
+  // once a transfer is mid-flight so the heartbeat path doesn't try to
+  // parse {"cmd":"chunk", ...} as state.
+  if (!_xActive) return strcmp(cmd, "permission") != 0;
 
   if (strcmp(cmd, "file") == 0) {
     const char* path = doc["path"];
     _xExpected = doc["size"] | 0;
     _xWritten = 0;
     if (!path) { _xAck("file", false); return true; }
-    char full[80]; snprintf(full, sizeof(full), "/characters/%s/%s", _xCharName, path);
-    _xFile = LittleFS.open(full, "w");
+    char full[96];
+    snprintf(full, sizeof(full), "/characters/%s/%s", _xCharName, path);
+    _xFile = storageFS().open(full, "w");
     _xAck("file", (bool)_xFile);
     return true;
   }
 
   if (strcmp(cmd, "chunk") == 0) {
     const char* b64 = doc["d"];
-    if (!b64 || !_xFile) { _xAck("chunk", false); return true; }
+    if (!b64 || !_xFile) {
+      Serial.printf("[xfer] chunk: missing %s\n", b64 ? "file" : "data");
+      _xAck("chunk", false);
+      return true;
+    }
     uint8_t buf[300];
     size_t outLen = 0;
+    size_t b64Len = strlen(b64);
     int rc = mbedtls_base64_decode(buf, sizeof(buf), &outLen,
-                                   (const uint8_t*)b64, strlen(b64));
-    if (rc != 0) { _xAck("chunk", false); return true; }
-    _xFile.write(buf, outLen);
+                                   (const uint8_t*)b64, b64Len);
+    if (rc != 0) {
+      Serial.printf("[xfer] chunk: base64 fail rc=%d in=%u out=%u\n",
+                    rc, (unsigned)b64Len, (unsigned)outLen);
+      _xAck("chunk", false);
+      return true;
+    }
+    size_t wrote = _xFile.write(buf, outLen);
+    // yield() lets FreeRTOS task scheduler run — LittleFS flash erase can
+    // block for hundreds of ms, and without yielding the IDLE task never
+    // gets to reset the task WDT. WDT-panic was the suspected cause of
+    // the second-chunk hang during the bufo test push.
+    yield();
+    if (wrote != outLen) {
+      Serial.printf("[xfer] chunk: write short wrote=%u expected=%u "
+                    "free=%llu\n",
+                    (unsigned)wrote, (unsigned)outLen,
+                    (unsigned long long)(storageTotalBytes() - storageUsedBytes()));
+      _xAck("chunk", false, _xWritten);
+      return true;
+    }
     _xWritten += outLen;
     _xTotalWritten += outLen;
-    // Ack every chunk — LittleFS writes can block on flash erase and the
-    // UART RX buffer is only ~256 bytes. Without this the sender overruns it.
+    // Ack every chunk: filesystem writes can block on flash erase, and
+    // the USB-CDC RX ring buffer is small. The sender waits for each ack
+    // so the buffer never overruns.
     _xAck("chunk", true, _xWritten);
     return true;
   }
@@ -225,7 +277,6 @@ inline bool xferCommand(JsonDocument& doc) {
   if (strcmp(cmd, "char_end") == 0) {
     _xActive = false;
     bool ok = characterInit(_xCharName);
-    extern bool buddyMode, gifAvailable;
     if (ok) { buddyMode = false; gifAvailable = true; speciesIdxSave(0xFF); }
     _xAck("char_end", ok);
     return true;
@@ -234,6 +285,16 @@ inline bool xferCommand(JsonDocument& doc) {
   return false;
 }
 
-inline bool xferActive() { return _xActive; }
+inline bool     xferActive()   { return _xActive; }
 inline uint32_t xferProgress() { return _xTotalWritten; }
-inline uint32_t xferTotal() { return _xTotal; }
+inline uint32_t xferTotal()    { return _xTotal; }
+
+// Wipe /characters/ — backs the "delete char" reset path.
+inline void xferDeleteAll() {
+  characterClose();
+  _xWipeAllChars();
+  gifAvailable = false;
+  buddyMode = true;
+  // Reset species sentinel so future load doesn't try GIF mode.
+  speciesIdxSave(0);
+}

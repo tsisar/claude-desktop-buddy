@@ -1,4 +1,4 @@
-# Makefile for the Waveshare ESP32-S3-Touch-AMOLED-1.8 port (and the M5 build).
+# Makefile for the Waveshare ESP32-S3-Touch-AMOLED-1.8 firmware.
 #
 # Quick start:
 #   make build        # compile the AMOLED firmware
@@ -8,7 +8,6 @@
 #
 # Override anything on the command line, e.g.:
 #   make flash PORT=/dev/cu.usbmodem1101
-#   make build ENV=m5stickc-plus
 
 # PlatformIO was installed into an isolated env (not on PATH); fall back to a
 # PATH `pio` if that location ever changes.
@@ -29,7 +28,7 @@ BAUD ?= 115200
 
 .DEFAULT_GOAL := build
 
-.PHONY: build flash upload monitor flash-monitor clean fs-flash erase ports m5 help
+.PHONY: build flash upload monitor flash-monitor clean fs-flash erase ports help
 
 ## build: compile the firmware for $(ENV)
 build:
@@ -64,10 +63,6 @@ clean:
 ## ports: list serial ports PlatformIO can see
 ports:
 	$(PIO) device list
-
-## m5: convenience — build the original M5StickC Plus firmware
-m5:
-	$(PIO) run -e m5stickc-plus
 
 ## help: list targets
 help:
