@@ -741,9 +741,8 @@ static void drawInfoButtons() {
   k(0xFFFF, "swipe v",       "next view");
   k(0xFFFF, "swipe ^",       "prev view");
   y += 10;
-  k(0xFFE0, "BOOT tap",      "cursor up");
-  k(0xFFE0, "PWR tap",       "cursor dn");
-  k(0xFFE0, "BOOT hold",     "menu/select");
+  k(0xFFE0, "PWR tap",       "screen off");
+  k(0xFFE0, "BOOT hold",     "open menu");
   k(0xFFE0, "PWR hold",      "power off");
 }
 
@@ -1030,9 +1029,11 @@ static void applyMainMenu(int idx) {
       enterState(UI_MENU_SETTINGS);
       break;
     case 1:   // turn off — display sleep; PWRON short tap wakes it back up.
-      // Full power-off via AXP2101 OFF register is owned by 3i.5
-      // (auto-sleep / wake flow), to keep this stage focused on UI.
-      powerSetDisplay(false);
+      // Blank via the brightness path (screenOn → setBrightness(0)), same as
+      // auto-sleep. NOT a rail toggle: ALDO1 is the codec rail and the panel
+      // isn't gated by ALDO1/ALDO3 anyway (see docs/device-power-map.md).
+      // Full power-off via AXP2101 OFF register is owned by 3i.5.
+      screenOn = false;
       enterState(UI_NORMAL);
       break;
     case 2:   // help → CONTROLS info page
@@ -1597,27 +1598,13 @@ void loop() {
     else if (pw == PWRON_SHORT) { navDown(); beep(1800, 20); }
     // PWRON_LONG falls through — AXP2101 owns it (hardware power-off).
   } else {
-    // No modal up. BOOT long is the only way to open the menu.
-    if (be == BOOT_LONG) { enterState(UI_MENU_MAIN); beep(800, 60); }
-
-    if (displayMode == DISP_NORMAL) {
-      // Home: PWRON = screen toggle, BOOT short = cycle display mode.
-      if (pw == PWRON_SHORT) {
-        screenOn = !screenOn;
-        applyBrightness();
-      }
-      if (be == BOOT_SHORT) {
-        displayMode = DISP_PET;   // NORMAL → PET
-        petPage = 0;
-        beep(1800, 30);
-      }
-    } else if (displayMode == DISP_PET) {
-      if (be == BOOT_SHORT)  { petPage = (petPage + 1) % PET_PAGES; beep(1800, 30); }
-      if (pw == PWRON_SHORT) { petPage = (petPage + PET_PAGES - 1) % PET_PAGES; beep(1800, 30); }
-    } else if (displayMode == DISP_INFO) {
-      if (be == BOOT_SHORT)  { infoPage = (infoPage + 1) % INFO_PAGES; beep(1800, 30); }
-      if (pw == PWRON_SHORT) { infoPage = (infoPage + INFO_PAGES - 1) % INFO_PAGES; beep(1800, 30); }
-    }
+    // No modal up. Physical keys no longer flip views/pages — that's touch
+    // only now (the swipe block below). Each key does exactly one thing here:
+    //   • PWRON short → blank/toggle the screen, from any home view
+    //   • BOOT  long  → open the menu
+    // (BOOT short is intentionally inert outside menus.)
+    if (pw == PWRON_SHORT) { screenOn = !screenOn; applyBrightness(); }
+    if (be == BOOT_LONG)   { enterState(UI_MENU_MAIN); beep(800, 60); }
   }
 
   // ── touch dispatch ──

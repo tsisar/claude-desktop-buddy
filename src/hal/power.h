@@ -38,9 +38,10 @@ bool charging();            // actively charging the cell
 enum PwronEvent : uint8_t { PWRON_NONE = 0, PWRON_SHORT = 1, PWRON_LONG = 2 };
 PwronEvent powerPollButton();
 
-// Display rail power gate (replaces M5.Axp.SetLDO2 used for screen on/off).
-// ALDO1 + ALDO3 are the AMOLED panel rails powerInit() brings up.
-void powerSetDisplay(bool on);
+// Screen on/off is NOT a rail toggle on this board: the panel runs on the
+// AXP2101 power-on defaults (see docs/device-power-map.md), and ALDO1 is the
+// ES8311 codec rail — cutting it kills audio. Blank the screen with
+// Surface::setBrightness(0) (the `screenOn` path in main.cpp), not a rail gate.
 
 // Dump every rail (voltage + on/off) to Serial — bring-up diagnostic.
 void powerDumpRails();
