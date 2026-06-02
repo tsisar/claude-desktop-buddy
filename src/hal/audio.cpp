@@ -26,6 +26,16 @@ extern "C" {
 #define MCLK_MULT    384             // MCLK = rate*384 = 6.144MHz (matches vendor)
 #define I2C_PORT     0               // Wire's default port (matches Wire.begin)
 
+// Volume curve. The ES8311 DAC volume reg (0x32) is linear-IN-dB (~0.5 dB/step,
+// reg 191 ≈ 0 dB, reg 0 = mute) and the vendored es8311_voice_volume_set maps
+// 0..100 straight onto 0..255 — so the bottom half of the scale is −30 dB and
+// below, inaudible on this tiny speaker (the "below 60 = silent" surprise;
+// upstream just sidesteps it with a fixed AUDIO_VOL=60). We instead compress our
+// user-facing 0..100 onto the driver's *audible* span [VOL_MIN_PCT..100] so the
+// whole slider does something. Tune on-device: lower VOL_MIN_PCT = quieter floor.
+#define VOL_MIN_PCT     60           // our 1% maps to this driver % (the audible floor)
+#define DEFAULT_VOLUME  20           // boot level on our 0..100 scale
+
 static i2s_chan_handle_t tx_chan = nullptr;
 static es8311_handle_t   es = nullptr;
 static bool              ok = false;
@@ -102,8 +112,8 @@ static bool codecInit() {
   if (es8311_init(es, &clk, ES8311_RESOLUTION_16, ES8311_RESOLUTION_16) != ESP_OK) return false;
   es8311_sample_frequency_config(es, clk.mclk_frequency, clk.sample_frequency);
   es8311_microphone_config(es, false);
-  es8311_voice_volume_set(es, 68, nullptr);   // max — debugging audibility
-  es8311_register_dump(es);                     // DEBUG: dump codec regs to serial
+  // Output volume is set once in audioInit() via audioSetVolume(DEFAULT_VOLUME)
+  // after init succeeds — keep it the single owner; don't set a level here too.
   return true;
 }
 
@@ -192,13 +202,18 @@ bool audioInit(TwoWire& /*w*/) {
   s_q = xQueueCreate(8, sizeof(AudioReq));
   if (!s_q) { Serial.println("[audio] queue alloc failed"); ok = false; return false; }
   xTaskCreatePinnedToCore(audioTask, "audio", 4096, nullptr, 5, nullptr, tskNO_AFFINITY);
+  audioSetVolume(DEFAULT_VOLUME);   // apply the remapped boot level
   return true;
 }
 
 bool audioOk() { return ok; }
 
 void audioSetVolume(uint8_t pct) {
-  if (ok && es) es8311_voice_volume_set(es, pct > 100 ? 100 : pct, nullptr);
+  if (!ok || !es) return;
+  if (pct > 100) pct = 100;
+  // Remap 1..100 onto the codec's audible window [VOL_MIN_PCT..100]; 0 = mute.
+  int drv = (pct == 0) ? 0 : VOL_MIN_PCT + (100 - VOL_MIN_PCT) * (pct - 1) / 99;
+  es8311_voice_volume_set(es, drv, nullptr);
 }
 
 void audioBeep(uint16_t freq, uint16_t ms) {
