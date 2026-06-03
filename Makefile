@@ -26,9 +26,12 @@ else
 endif
 BAUD ?= 115200
 
+# Where `make log` mirrors the serial stream. Override with `make log LOG=...`.
+LOG  ?= $(HOME)/buddy-serial.log
+
 .DEFAULT_GOAL := build
 
-.PHONY: build flash upload monitor flash-monitor clean fs-flash erase ports help
+.PHONY: build flash upload monitor flash-monitor log clean fs-flash erase ports help
 
 ## build: compile the firmware for $(ENV)
 build:
@@ -47,6 +50,10 @@ monitor:
 
 ## flash-monitor: upload then jump straight into the monitor
 flash-monitor: flash monitor
+
+## log: monitor AND mirror the serial stream to $(LOG) for later grepping
+log:
+	$(PIO) device monitor -p $(PORT) -b $(BAUD) | tee $(LOG)
 
 ## fs-flash: build + upload the LittleFS image (GIF character packs in data/)
 fs-flash:
