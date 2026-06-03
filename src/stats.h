@@ -223,6 +223,22 @@ inline void settingsSave() {
   _prefs.end();
 }
 
+// Brightness tier (0..4) persistence. Kept as its own key rather than folded
+// into Settings because brightLevel lives as a free global in main.cpp; this
+// mirrors the speciesIdx* helpers. Defaults to 4 (max) on a fresh NVS.
+inline uint8_t brightnessLoad() {
+  _prefs.begin("buddy", true);
+  uint8_t v = _prefs.getUChar("bright", 4);
+  _prefs.end();
+  return v > 4 ? 4 : v;
+}
+
+inline void brightnessSave(uint8_t v) {
+  _prefs.begin("buddy", false);
+  _prefs.putUChar("bright", v);
+  _prefs.end();
+}
+
 static char _petName[24] = "Buddy";
 static char _ownerName[32] = "";
 

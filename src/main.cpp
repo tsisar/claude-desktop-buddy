@@ -1179,7 +1179,8 @@ static void cycleSpecies(int dir) {
 static void applySettings(int idx) {
   Settings& s = settings();
   switch (idx) {
-    case 0: brightLevel = (brightLevel + 1) % 5; applyBrightness(); return;
+    case 0: brightLevel = (brightLevel + 1) % 5; applyBrightness();
+            brightnessSave(brightLevel); return;
     case 1: s.sound   = !s.sound;   break;
     case 2: s.hud     = !s.hud;     break;
     case 3: s.battery = !s.battery; break;
@@ -1537,6 +1538,7 @@ void setup() {
 
   statsLoad();
   settingsLoad();
+  brightLevel = brightnessLoad();   // restore saved brightness tier (was always max)
   petNameLoad();
   buddyInit();   // pulls saved species index from NVS (defaults to 0)
   // Scan /characters/ for an installed pack. If one's there, mark it
