@@ -3,9 +3,9 @@
 
 // "ember" — a block-art living flame in Claude terracotta. The body is
 // drawn entirely from Unicode Block Elements (U+2580–U+259F) via
-// buddyPrintBlocks (see src/blockart.*); a hotter flicker tongue rides
-// above it and ASCII particles (z / sparks / ! / hearts / stars) add
-// life. All seven persona states are animated.
+// buddyPrintBlocks (see src/blockart.*); a hotter flicker tongue is reserved
+// for BUSY, and ASCII particles (z / sparks / ! / hearts / stars) add life.
+// All seven persona states are animated.
 //
 // Authoring grid: 9 cells wide, monospace. Block cells fill seamlessly;
 // gaps (spaces) inside the body read as eyes. Motion comes from the
@@ -57,11 +57,6 @@ static void doSleep(uint32_t t) {
   static const uint8_t SEQ[] = { 0,0,0,0, 1,1, 0,0,0,0, 0,0 };
   uint8_t beat = (t / 6) % sizeof(SEQ);
   buddyPrintBlocks(P[SEQ[beat]], 3, 2 + DROP, TERRA_DIM);
-
-  // a single low embered glow that pulses
-  if ((t / 6) & 1) {
-    buddyPrintBlocks(FL_LO, 2, 2 - 16, 0x8800 /*dim red-orange*/);
-  }
 
   int p1 = (t)     % 12;
   int p2 = (t + 5) % 12;
@@ -122,7 +117,6 @@ static void doAttention(uint32_t t) {
   uint8_t beat = (t / 4) % sizeof(SEQ);
   int xOff = (t & 1) ? 1 : -1;   // jittery alertness
   buddyPrintBlocks(P[SEQ[beat]], 3, -2 + DROP, EMBER_HOT, xOff);
-  flame(t, -2);
 
   if ((t / 2) & 1) {
     buddySetColor(SPARK);
@@ -148,7 +142,6 @@ static void doCelebrate(uint32_t t) {
   static const int8_t Y_JUMP[]  = { 1,-2,-7,-9,-7,-2, 1,-2,-7,-9,-7,-2, 1,1 };
   uint8_t beat = (t / 3) % sizeof(SEQ);
   buddyPrintBlocks(P[SEQ[beat]], 3, Y_JUMP[beat] + DROP, EMBER_HOT);
-  flame(t, Y_JUMP[beat]);
 
   static const uint16_t cols[] = { SPARK, BUDDY_HEART, EMBER_HOT, TERRA, BUDDY_RED };
   for (int i = 0; i < 6; i++) {
@@ -192,7 +185,6 @@ static void doHeart(uint32_t t) {
   static const int8_t BOB[]  = { 0,-1,0,-1, 0,-1,0,-1, 0,0,0,-1, 0,-1 };
   uint8_t beat = (t / 5) % sizeof(SEQ);
   buddyPrintBlocks(P[SEQ[beat]], 3, BOB[beat] + DROP, TERRA);
-  flame(t, BOB[beat]);
 
   buddySetColor(BUDDY_HEART);
   for (int i = 0; i < 5; i++) {
