@@ -453,23 +453,27 @@ static void drawApproval() {
   } else {
     buddyTick(P_ATTENTION);
   }
-  drawBatteryWidget(W - 14 - 14 - SAFE, 14 + SAFE);   // top-right, same as home
-  if (settings().battery && dataRtcValid())
-    clockDrawWidget(SAFE + 2, 14 + SAFE + 17);        // top-left, mirrors the battery
+  // No top HUD here (battery/clock are hidden during a prompt) — the buddy
+  // gets the full upper area. The "approve? Ns" countdown rides as a banner
+  // along the very top instead of in the old below-the-buddy slot, so the
+  // buddy can drop the global 32 px without crowding it.
+  //
+  // Geometry (368×448, SCALE 4, BUDDY_Y_SHIFT 32): the highest ATTENTION
+  // pixel is the "!" spark at logical y = BUDDY_Y_OVERLAY-8 → 24 px. A size-2
+  // banner at y=2 spans 2..18 px, clearing the spark by 6 px. Size 3 (→26 px)
+  // would collide, so keep it at size 2.
+  uint32_t waited = (millis() - promptArrivedMs) / 1000;
+  gfx.setTextSize(2);
+  gfx.setTextColor(waited >= 10 ? 0xFA20 : 0xC618, 0x0000);
+  gfx.setTextDatum(TC_DATUM);
+  char top[24]; snprintf(top, sizeof(top), "approve?  %lus", (unsigned long)waited);
+  gfx.drawString(top, W / 2, 2);
+  gfx.setTextDatum(TL_DATUM);
 
   // ── approval card (bottom third) ──
   const int cardTop = 296;
   gfx.fillRect(0, cardTop, W, H - cardTop, 0x0000);   // mask any buddy bleed
   gfx.drawFastHLine(0, cardTop, W, 0x4208);
-
-  // "approve? Ns" countdown — centred just above the divider, below the buddy.
-  uint32_t waited = (millis() - promptArrivedMs) / 1000;
-  gfx.setTextSize(2);
-  gfx.setTextColor(waited >= 10 ? 0xFA20 : 0xC618, 0x0000);
-  gfx.setTextDatum(BC_DATUM);
-  char top[24]; snprintf(top, sizeof(top), "approve?  %lus", (unsigned long)waited);
-  gfx.drawString(top, W / 2, cardTop - 4);
-  gfx.setTextDatum(TL_DATUM);
 
   // Tool name — largest size whose pixel width fits, truncated with '~' if
   // even the smallest won't (avoids the off-screen wrap that garbled it).
