@@ -35,6 +35,9 @@ static const char* const LEAN_L[3]  = { "▐▛███▜▌  ", "▜███
 static const char* const LEAN_R[3]  = { "  ▐▛███▜▌", " ▝▜█████▛", "   ▘▘ ▝▝ " };
 static const char* const DROWSE[3]  = { "         ", " ▗▄███▄▖ ", "  ▘▘ ▝▝  " };
 static const char* const HAPPY[3]   = { " ▐▛███▜▌ ", "▝▜█▘█▝█▛▘", "  ▘▘ ▝▝  " };
+// Wink poses: fill one top-row eye-notch (▛ / ▜) so that eye reads closed.
+static const char* const WINK_L[3]  = { " ▐████▜▌ ", "▝▜█████▛▘", "  ▘▘ ▝▝  " };
+static const char* const WINK_R[3]  = { " ▐▛████▌ ", "▝▜█████▛▘", "  ▘▘ ▝▝  " };
 
 // ── flame tongue frames (2 rows, hot color), centered on col 4 ──────────────
 static const char* const FL_L[2] = { "    ▟▖   ", "   ▝█▘   " };
@@ -74,20 +77,23 @@ static void doSleep(uint32_t t) {
   buddyPrint("z");
 }
 
-// ─── IDLE ───  gentle flicker, blinks, look around, soft bob
+// ─── IDLE ───  steady solid ember: soft bob, occasional look-around, winks.
+// No flame tongue and no face gaps here — keeps the clean, recognizable
+// Claude ember silhouette while parked (the gapped EYES pose read as an
+// open mouth, so idle stays solid). The only face animation is a wink:
+// left eye, then later the right.
 static void doIdle(uint32_t t) {
-  const char* const* P[5] = { EYES, NEUTRAL, EYES, LEAN_L, LEAN_R };
+  const char* const* P[5] = { NEUTRAL, LEAN_L, LEAN_R, WINK_L, WINK_R };
   static const int8_t SEQ[] = {
-    0,0,0,1,0,0,0,0, 2,0, 3,0,4,0, 0,0,0,1,0,0, 0,0
+    0,0,0,3,0,0,0,0, 0,0, 1,0,2,0, 0,0,0,4,0,0, 0,0
   };
   static const int8_t BOB[]  = {
     0,-1,0,-1,0,-1,0,0, 0,0, 0,0,0,0, 0,-1,0,-1,0,0, 0,-1
   };
   uint8_t beat = (t / 5) % sizeof(SEQ);
   uint8_t pose = SEQ[beat];
-  int xOff = (pose == 3) ? -1 : (pose == 4) ? 1 : 0;
+  int xOff = (pose == 1) ? -1 : (pose == 2) ? 1 : 0;
   buddyPrintBlocks(P[pose], 3, BOB[beat] + DROP, TERRA, xOff);
-  flame(t, BOB[beat]);
 }
 
 // ─── BUSY ───  taller focused flame, fast flicker, dot ticker, sparks
