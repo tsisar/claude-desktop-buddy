@@ -27,3 +27,11 @@ bool expanderOk();
 // from the vendor example. Called from powerInit() — callers don't usually
 // invoke this directly.
 void expanderResetPulse();
+
+// Hardware-reset ONLY the FT3168 touch controller (expander pin 2 = TOUCH_RST,
+// active low), leaving the display reset (pin 0 = LCD_RST) high so the panel is
+// never disturbed. Pin map verified against the vendor BSP
+// (esp32_s3_touch_amoled_1_8.h: LCD_RST=0, DSI_PWR_EN=1, TOUCH_RST=2, SD_CS=7).
+// This is the real recovery for a wedged touch chip — SCL-clocking the bus
+// can't reboot the chip, this pin can.
+void expanderTouchReset();

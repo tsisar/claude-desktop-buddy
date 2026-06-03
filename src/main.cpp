@@ -1042,7 +1042,7 @@ static int menuHit(int tx, int ty, int items) {
 
 // ── main menu (3i.3) ───────────────────────────────────────────────────────
 static const char* const MAIN_ITEMS[] = {
-  "settings", "turn off", "help", "about", "demo", "close"
+  "settings", "turn off", "help", "about", "demo", "reboot", "close"
 };
 static const int MAIN_N = sizeof(MAIN_ITEMS) / sizeof(MAIN_ITEMS[0]);
 
@@ -1080,7 +1080,27 @@ static void applyMainMenu(int idx) {
     case 4:   // demo
       dataSetDemo(!dataDemo());
       break;
-    case 5:   // close
+    case 5:   // reboot — clean software restart, for catching boot logs on a
+      // glitchy session without pulling power. Clear the hang breadcrumb first
+      // so this deliberate reboot reports as a cold boot next time, not a false
+      // "[hang] warm reset". Beep + a short blank so the press is acknowledged
+      // before the chip resets.
+      beep(600, 120);
+      {
+        // Report the loop stage we were in when reboot was pressed: if the UI
+        // was sluggish-but-alive, this names what was eating the loop. Then
+        // clear the breadcrumb so the next boot reads as a clean cold boot
+        // (a deliberate reboot must not masquerade as a watchdog "[hang]").
+        uint8_t st = (bcStage < sizeof(LS_NAME) / sizeof(LS_NAME[0])) ? bcStage : 0;
+        Serial.printf("[reboot] user-requested restart — was at stage=%s loops=%lu\n",
+                      LS_NAME[st], (unsigned long)bcLoops);
+      }
+      bcMagic = 0;
+      Serial.flush();
+      delay(150);
+      esp_restart();
+      break;
+    case 6:   // close
       enterState(UI_NORMAL);
       break;
   }
@@ -1491,6 +1511,8 @@ void setup() {
   bcMagic = BC_MAGIC; bcStage = 0; bcLoops = 0;
 
   Wire.begin(IIC_SDA, IIC_SCL, 400000);
+  Wire.setTimeOut(50);   // bound any I2C stall (a wedged touch chip must not
+                         // hang the loop or starve AXP battery/PWRON reads)
   powerInit(Wire);
   dispOk = gfx.begin();
   imuInit(Wire);

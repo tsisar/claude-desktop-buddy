@@ -56,3 +56,14 @@ void expanderResetPulse() {
   // handles that on top.
   delay(50);
 }
+
+void expanderTouchReset() {
+  if (!ok) return;
+  // Pin 2 = FT3168 TOUCH_RST (active low). 0xFB = 1111_1011 → only pin 2 LOW
+  // (assert touch reset); pin 0 (LCD_RST) and pin 1 (DSI_PWR_EN) stay HIGH so
+  // the display is untouched. (Bits 3..7 are inputs, value ignored.)
+  write8(REG_OUTPUT, 0xFB);
+  delay(20);
+  write8(REG_OUTPUT, 0xFF);   // release — the FT3168 reboots from here
+  delay(50);
+}

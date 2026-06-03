@@ -1,4 +1,5 @@
 #include "touch.h"
+#include "expander.h"
 #include "../board_pins.h"
 #include <Arduino.h>
 #include <Wire.h>
@@ -15,6 +16,82 @@
 
 static TwoWire* bus = nullptr;
 static bool     ok  = false;
+
+// Touch-failure escalation state. A glitching FT3168 can hold SDA low
+// mid-transfer (ESD, rail noise), which stalls EVERY device on the shared bus —
+// the AXP2101 included, so battery % reads as -1 and the PWRON key stops firing.
+// A single glitch clears in one bus-recover; a HARD-wedged FT3168 never comes
+// back from SCL-clocking (verified on hardware — it just re-stalls every loop,
+// spamming the bus and the log). So we escalate: try to free the bus a few
+// times, and if it stays dead for ~3s, disable touch until the next reboot.
+// That frees the bus for the AXP, ends the log spam, and keeps the device
+// usable via the physical buttons. A reboot re-inits the chip from scratch.
+static uint8_t  failStreak    = 0;
+static uint32_t lastRecoverMs = 0;
+
+// Clock SCL up to 9 times to let a slave stuck mid-byte finish and release SDA,
+// emit a STOP, then re-init the controller (also clears any hung state in the
+// ESP32 I2C driver). Silent — the caller owns logging/escalation.
+static void i2cClockBusFree() {
+  bus->end();
+  pinMode(IIC_SCL, OUTPUT_OPEN_DRAIN);
+  pinMode(IIC_SDA, INPUT_PULLUP);
+  for (int i = 0; i < 9 && digitalRead(IIC_SDA) == LOW; i++) {
+    digitalWrite(IIC_SCL, LOW);  delayMicroseconds(5);
+    digitalWrite(IIC_SCL, HIGH); delayMicroseconds(5);
+  }
+  // STOP condition: SDA low→high while SCL is held high.
+  pinMode(IIC_SDA, OUTPUT_OPEN_DRAIN);
+  digitalWrite(IIC_SDA, LOW);  delayMicroseconds(5);
+  digitalWrite(IIC_SCL, HIGH); delayMicroseconds(5);
+  digitalWrite(IIC_SDA, HIGH); delayMicroseconds(5);
+
+  bus->begin(IIC_SDA, IIC_SCL, 400000);
+  bus->setTimeOut(50);   // bound any future stall; survives the re-begin
+}
+
+// One touch transaction failed. Attempt recovery at most ~2x/sec; give up (and
+// disable touch) after a few seconds of unbroken failure so we stop thrashing
+// the shared bus and flooding the log.
+static void touchFail() {
+  if (!bus) return;
+  uint32_t now = millis();
+  if (now - lastRecoverMs < 500) return;
+  lastRecoverMs = now;
+
+  if (++failStreak == 1)
+    Serial.println("[touch] FT3168 I2C stalled — recovering shared bus");
+
+  i2cClockBusFree();        // free the bus first so the expander write can land
+  expanderTouchReset();     // then HARD-reset the FT3168 (pin 2) — the real fix
+
+  if (failStreak >= 6) {   // ~3s of solid failure — it isn't coming back now
+    ok = false;            // stop polling: frees the bus for AXP, ends the spam
+    Serial.println("[touch] wedged — paused; auto-retry every 5s "
+                   "(buttons still work; suspect FT3168 rail/ALDO3)");
+  }
+}
+
+// While touch is paused (wedged at runtime, or never found at boot), retry a
+// clean re-probe every 5s so a chip that recovers comes back on its own — no
+// reboot needed. Cheap: a single ACK probe behind a 50ms timeout, and only
+// while ok==false, so it never costs the healthy path anything.
+static void touchTryReinit() {
+  if (!bus) return;
+  static uint32_t lastTryMs = 0;
+  uint32_t now = millis();
+  if (now - lastTryMs < 5000) return;
+  lastTryMs = now;
+
+  i2cClockBusFree();                 // unstick the bus before probing
+  expanderTouchReset();              // give the chip a clean hardware reboot
+  bus->beginTransmission(TOUCH_ADDR);
+  if (bus->endTransmission() == 0) {
+    ok = true;
+    failStreak = 0;
+    Serial.println("[touch] FT3168 back online — re-enabled");
+  }
+}
 
 bool touchInit(TwoWire& w) {
   if (ok) return true;
@@ -41,12 +118,18 @@ bool touchInit(TwoWire& w) {
 bool touchOk() { return ok; }
 
 bool touchRead(uint16_t* x, uint16_t* y) {
-  if (!ok) return false;
+  if (!ok) { touchTryReinit(); return false; }
   // Point register at 0x02 (touch-count), then read the 5-byte block.
   bus->beginTransmission(TOUCH_ADDR);
   bus->write(0x02);
-  if (bus->endTransmission(false) != 0) return false;
-  if (bus->requestFrom((int)TOUCH_ADDR, 5) != 5) return false;
+  if (bus->endTransmission(false) != 0) { touchFail(); return false; }
+  if (bus->requestFrom((int)TOUCH_ADDR, 5) != 5) { touchFail(); return false; }
+  // Transaction went through — clear the failure streak (note the recovery if
+  // we'd been struggling, so the log shows the glitch was transient).
+  if (failStreak) {
+    Serial.printf("[touch] bus recovered after %u tries\n", failStreak);
+    failStreak = 0;
+  }
   uint8_t n  = bus->read();
   uint8_t xh = bus->read();
   uint8_t xl = bus->read();
