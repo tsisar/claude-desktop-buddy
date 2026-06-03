@@ -2,9 +2,15 @@
 #include "board_pins.h"   // LCD_WIDTH / LCD_HEIGHT
 #include "hal/display.h"  // Surface
 #include "hal/rtc.h"      // RtcTime/RtcDate, rtcGetTime/rtcGetDate
-#include "data.h"         // dataRtcValid(); pulls stats.h for settings()
 #include <Arduino.h>
 
+// Purely presentational: the caller (main.cpp) owns the "should this show"
+// policy — settings().battery + dataRtcValid() — because that state lives in
+// data.h/stats.h, which are file-static singletons valid only in main.cpp's
+// translation unit. We must NOT include them here or we'd read a second,
+// always-default copy (that bug hid the widget). We only read the RTC HAL
+// (a real .cpp) and draw.
+//
 // Shared render surface, defined in main.cpp (same extern pattern as
 // character.cpp). The battery widget also lives in main.cpp's render layer;
 // the full face overlays it top-right.
@@ -20,9 +26,8 @@ static const char* const MON[] = {
 static const char* const DOW[] = { "Sun","Mon","Tue","Wed","Thu","Fri","Sat" };
 
 void clockDrawWidget(int x, int y) {
-  if (!settings().battery) return;
   RtcTime tm;
-  if (!dataRtcValid() || !rtcGetTime(&tm)) return;
+  if (!rtcGetTime(&tm)) return;
   char hm[6]; snprintf(hm, sizeof(hm), "%02u:%02u", tm.Hours, tm.Minutes);
   gfx.setTextSize(2);
   gfx.setTextColor(0xFFFF, 0x0000);

@@ -82,6 +82,10 @@ inline const char* dataScenarioName() {
 // hold whatever was on the coin cell (or 2000-01-01 if it lost power).
 static bool _rtcValid = false;
 inline bool dataRtcValid() { return _rtcValid; }
+// Seed validity from a backup-kept hardware RTC at boot (see main setup), so
+// the clock is trusted without waiting for a bridge re-sync. The bridge still
+// overwrites with authoritative time when it connects.
+inline void dataSetRtcValid(bool v) { _rtcValid = v; }
 
 // Forward to the real xfer.h handler defined in xfer.h (Stage 4c).
 // Declared as a free function so the linker pairs the call site here with

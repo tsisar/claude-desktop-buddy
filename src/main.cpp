@@ -417,7 +417,8 @@ static void drawHome() {
   }
   if (settings().hud) drawHUD();   // "transcript" setting gates the HUD
   drawBatteryWidget(W - 14 - 14 - SAFE, 14 + SAFE);   // top-right, alongside the buddy
-  clockDrawWidget(SAFE + 2, 14 + SAFE + 17);          // top-left, mirrors the battery
+  if (settings().battery && dataRtcValid())
+    clockDrawWidget(SAFE + 2, 14 + SAFE + 17);        // top-left, mirrors the battery
 }
 
 // ── approval screen (3i.2) ─────────────────────────────────────────────────
@@ -434,7 +435,8 @@ static void drawApproval() {
     buddyTick(P_ATTENTION);
   }
   drawBatteryWidget(W - 14 - 14 - SAFE, 14 + SAFE);   // top-right, same as home
-  clockDrawWidget(SAFE + 2, 14 + SAFE + 17);          // top-left, mirrors the battery
+  if (settings().battery && dataRtcValid())
+    clockDrawWidget(SAFE + 2, 14 + SAFE + 17);        // top-left, mirrors the battery
 
   // ── approval card (bottom third) ──
   const int cardTop = 296;
@@ -1416,6 +1418,19 @@ void setup() {
   dispOk = gfx.begin();
   imuInit(Wire);
   rtcInit(Wire);
+  // If a backup cell kept the PCF85063 running, its time is trustworthy at
+  // boot — trust it immediately rather than waiting for the bridge to re-sync.
+  // rtcGetDate/Time return false when the oscillator stopped (the OS flag, set
+  // on power loss with no backup), so this is a no-op on un-backed boots. The
+  // bridge still overwrites with authoritative time + tz once it connects.
+  {
+    RtcDate rd; RtcTime rt;
+    if (rtcOk() && rtcGetDate(&rd) && rtcGetTime(&rt) && rd.Year >= 2024) {
+      dataSetRtcValid(true);
+      Serial.printf("[3i.4] rtc held time across boot: %04u-%02u-%02u %02u:%02u\n",
+                    rd.Year, rd.Month, rd.Date, rt.Hours, rt.Minutes);
+    }
+  }
   audioInit(Wire);
   touchInit(Wire);
   storageInit();   // SD if available, else LittleFS — for xfer.h (Stage 4c)
@@ -1444,6 +1459,12 @@ void setup() {
   Serial.printf("[3i.4] disp=%d touch=%d imu=%d rtc=%d pmu=%d  name=%s\n",
                 dispOk, touchOk(), imuOk(), rtcOk(), powerOk(), btName);
   Serial.printf("[3i.4] audio ok=%d  sound=%d\n", audioOk(), settings().sound);
+  // RTC backup-cell charger (AXP2101 VBACKUP, pin 27). Only the enable bit is
+  // observable — there's no ADC for that cell. On stock boards the backup
+  // connector (H3 / VBAT2) is unpopulated, so this charges nothing and the
+  // clock resets on a full power-off; solder a cell to H3 to keep time.
+  Serial.printf("[3i.4] rtc-backup charge=%d (target 3000mV, needs cell on H3)\n",
+                batteryBackupChargeEnabled());
 }
 
 void loop() {

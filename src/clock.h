@@ -8,8 +8,9 @@
 // home / PET views.
 
 // Small HH:MM at (x, y) — middle-left anchor, mirroring the battery widget
-// on the right. No-op until the RTC holds a real bridge-synced time (so we
-// never flash a cold-boot 00:00), and hidden by the "battery" UI setting.
+// on the right. Purely renders the current RTC time (no-op if the clock
+// can't be read). The caller gates visibility — RTC-synced + the "battery"
+// UI setting — because that state is main.cpp-only (see clock.cpp).
 void clockDrawWidget(int x, int y);
 
 // Full-screen clock face: big HH:MM, seconds, weekday/month/date line, and

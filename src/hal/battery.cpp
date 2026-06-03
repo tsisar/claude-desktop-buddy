@@ -48,6 +48,21 @@ void batteryConfigCharger() {
   // getBatteryPercent() report the real charge — without it the gauge
   // register holds its power-on default (100), so every cell reads full.
   axp().fuelGaugeControl(true, true);
+
+  // RTC backup-cell charger (AXP2101 VBACKUP, pin 27). Confirmed from the
+  // board schematic: PCF85063 VDD (net VCC-RTC) is fed by the AXP's RTCLDO
+  // (pin 28), which the PMU holds up from a backup cell on VBACKUP once main
+  // power is gone — so a cell here is what carries the clock through a *full*
+  // power-off. That backup cell connects at H3 (net VBAT2), a RESERVED and
+  // UNPOPULATED connector on stock boards; until one is fitted this charger
+  // has nothing to charge and the clock still resets on full off (verified on
+  // hardware: time holds across a warm reboot, dies on full off). Fit a
+  // rechargeable coin (e.g. ML1220) or a small supercap to H3 and the time
+  // survives. Enabling the charger now is harmless when H3 is empty.
+  // 3.0 V termination (range 2600–3300, 100 mV steps) — safe for ML-series
+  // coins and supercaps; raise toward 3100–3200 for a fuller ML1220.
+  axp().setButtonBatteryChargeVoltage(3000);
+  axp().enableButtonBatteryCharge();
 }
 
 int batteryMilliVolts() {
@@ -65,3 +80,12 @@ int batteryPercent() {
 
 bool onUsb()    { return powerOk() && axp().isVbusIn(); }
 bool charging() { return powerOk() && axp().isCharging(); }
+
+bool batteryBackupChargeEnabled() {
+  // NB: there is no ADC for the VBACKUP cell — XPowersLib's
+  // getButtonBatteryVoltage() just reads back the configured *termination*
+  // voltage, not a measurement, so it can't tell us if a cell is fitted.
+  // The most we can confirm in firmware is that the charger bit is set; cell
+  // presence only shows up in the power-off survival test.
+  return powerOk() && axp().isEnableButtonBatteryCharge();
+}

@@ -17,3 +17,11 @@ int  batteryMilliVolts();   // 0 if unknown
 int  batteryPercent();      // 0..100, 0 if unknown
 bool onUsb();               // VBUS present
 bool charging();            // actively charging the cell
+
+// Whether the AXP2101 RTC backup-cell charger (VBACKUP, pin 27) is enabled.
+// There is NO ADC for that cell, so its voltage / presence can't be read in
+// firmware — and on stock boards the backup connector (H3 / VBAT2) is
+// unpopulated, so this stays a no-op until a cell is soldered there. With a
+// cell fitted it carries the PCF85063 clock through a full power-off. See
+// batteryConfigCharger().
+bool batteryBackupChargeEnabled();
