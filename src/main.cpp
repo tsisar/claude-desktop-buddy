@@ -69,7 +69,10 @@ static const int SAFE = 4;
 // ── buddy_common.h symbol definitions (Surface backing) ────────────────────
 const int BUDDY_X_CENTER  = W / 2;
 const int BUDDY_CANVAS_W  = W;
-const int BUDDY_Y_BASE    = 35;   // logical; ×SCALE(4) px. Nudged 30→35 = +20 px down.
+// Logical body anchor. Also used by species as the lower clip bound for
+// particles (e.g. `y > BUDDY_Y_BASE + 20`), so it stays at its design value
+// of 30 — do NOT nudge it to move the buddy down; use BUDDY_Y_SHIFT instead.
+const int BUDDY_Y_BASE    = 30;
 const int BUDDY_Y_OVERLAY = 6;
 const int BUDDY_CHAR_W    = 6;
 const int BUDDY_CHAR_H    = 8;
@@ -78,10 +81,17 @@ const uint16_t BUDDY_BG=0x0000, BUDDY_HEART=0xF810, BUDDY_DIM=0x8410,
   BUDDY_PURPLE=0xA01F, BUDDY_RED=0xF800, BUDDY_BLUE=0x041F;
 static const uint8_t SCALE = 4;
 
+// Whole-buddy vertical offset, in pixels, applied uniformly to the sprite
+// body AND every particle. This is the knob for "push all buddies down so
+// they clear the top battery/clock HUD" — it moves body and overlays as one
+// rigid unit, unlike BUDDY_Y_BASE which only shifts the body. The HUD is
+// drawn outside these helpers, so it stays put.
+static const int BUDDY_Y_SHIFT = 32;
+
 void buddyPrintLine(const char* line, int yPx, uint16_t color, int xOff) {
   int w = strlen(line) * BUDDY_CHAR_W * SCALE;
   gfx.setTextColor(color, BUDDY_BG);
-  gfx.setCursor(BUDDY_X_CENTER - w/2 + xOff*SCALE, yPx);
+  gfx.setCursor(BUDDY_X_CENTER - w/2 + xOff*SCALE, yPx + BUDDY_Y_SHIFT);
   gfx.print(line);
 }
 void buddyPrintSprite(const char* const* lines, uint8_t n, int yOffset, uint16_t color, int xOff) {
@@ -95,10 +105,10 @@ void buddyPrintBlocks(const char* const* lines, uint8_t n, int yOffset, uint16_t
   for (uint8_t i = 0; i < n; i++)
     blockart::drawLineCentered(gfx, lines[i],
                                BUDDY_X_CENTER + xOff * SCALE,
-                               yBase + (yOffset + i*BUDDY_CHAR_H)*SCALE,
+                               yBase + (yOffset + i*BUDDY_CHAR_H)*SCALE + BUDDY_Y_SHIFT,
                                SCALE, color, BUDDY_BG);
 }
-void buddySetCursor(int x, int y) { gfx.setCursor(BUDDY_X_CENTER + (x-BUDDY_X_CENTER)*SCALE, y*SCALE); }
+void buddySetCursor(int x, int y) { gfx.setCursor(BUDDY_X_CENTER + (x-BUDDY_X_CENTER)*SCALE, y*SCALE + BUDDY_Y_SHIFT); }
 void buddySetColor(uint16_t fg) { gfx.setTextColor(fg, BUDDY_BG); }
 void buddyPrint(const char* s) { gfx.setTextSize(SCALE); gfx.print(s); }
 
