@@ -28,6 +28,7 @@
 #include <Wire.h>
 #include <Preferences.h>
 #include <esp_mac.h>
+#include <esp_system.h>   // esp_reset_reason() — hang breadcrumb at boot
 #include <string.h>
 #include <math.h>
 #include "board_pins.h"
@@ -80,6 +81,32 @@ const uint16_t BUDDY_BG=0x0000, BUDDY_HEART=0xF810, BUDDY_DIM=0x8410,
   BUDDY_YEL=0xFFE0, BUDDY_WHITE=0xFFFF, BUDDY_CYAN=0x07FF, BUDDY_GREEN=0x07E0,
   BUDDY_PURPLE=0xA01F, BUDDY_RED=0xF800, BUDDY_BLUE=0x041F;
 static const uint8_t SCALE = 4;
+
+// ── hang breadcrumb (diagnostic) ───────────────────────────────────────────
+// RTC_NOINIT survives a warm reset but is wiped by a real power-cut. The
+// loop-WDT (5s, warm panic-reboot) trips BEFORE the AXP2101 hardware WDT (8s,
+// hard rail cut), so a wedged loop is caught warm first and the last stage
+// loop() entered survives here to be printed on the next boot — naming the
+// subsystem that hung. Only a deeper failure (the panic handler itself stuck)
+// lets the AXP do its hard cut, which wipes this; that's the truly
+// unrecoverable case the AXP backstop exists for.
+enum LoopStage : uint8_t {
+  LS_DATAPOLL = 1, LS_IMU, LS_AUTOOFF, LS_BLE, LS_BUTTONS,
+  LS_TOUCH, LS_RENDER, LS_PUSH,
+};
+static const char* const LS_NAME[] = {
+  "?", "dataPoll", "imu", "autoOff", "ble", "buttons",
+  "touch", "render", "pushSprite",
+};
+RTC_NOINIT_ATTR static uint32_t bcMagic;
+RTC_NOINIT_ATTR static uint8_t  bcStage;
+RTC_NOINIT_ATTR static uint32_t bcLoops;
+static const uint32_t BC_MAGIC = 0xB0FFEE01;
+static inline void bc(uint8_t s) { bcStage = s; }
+// Human-readable summary of the *previous* boot's hang, filled once at setup()
+// from the surviving breadcrumb. Empty on a clean cold boot. Shown on the
+// INFO/DEVICE page so a field repro (no serial attached) is still diagnosable.
+static char lastHang[40] = "";
 
 // Whole-buddy vertical offset, in pixels, applied uniformly to the sprite
 // body AND every particle. This is the knob for "push all buddies down so
@@ -833,6 +860,15 @@ static void drawInfoDevice() {
     snprintf(b, sizeof(b), "%s", storageBackendName());
   }
   kv("storage", b);
+
+  // Last hang recovery, if any — the loop stage the *previous* boot wedged in,
+  // recovered by the loop/AXP watchdog. Blank after a clean cold boot. Drawn in
+  // alert orange so a field repro stands out without needing serial.
+  if (lastHang[0]) {
+    gfx.setTextColor(0xFD20, 0x0000);
+    kv("recover", lastHang);
+    gfx.setTextColor(0xC618, 0x0000);
+  }
 }
 
 static void drawInfoBluetooth(const char* btName) {
@@ -1439,6 +1475,21 @@ void setup() {
   Serial.begin(115200); Serial.setTxTimeoutMs(0); delay(300);
   Serial.println("\n[3i.3] UI shell + menu stack");
 
+  // Hang breadcrumb: if RTC RAM survived (warm reset from the loop-WDT), the
+  // last loop stage tells us which subsystem wedged. A cold boot (power-cut,
+  // first flash, or the AXP hard-WDT) shows garbage magic → report nothing.
+  esp_reset_reason_t rr = esp_reset_reason();
+  if (bcMagic == BC_MAGIC) {
+    uint8_t st = (bcStage < sizeof(LS_NAME) / sizeof(LS_NAME[0])) ? bcStage : 0;
+    snprintf(lastHang, sizeof(lastHang), "%s @%lu", LS_NAME[st],
+             (unsigned long)bcLoops);
+    Serial.printf("[hang] warm reset (reason=%d) — last stage=%s loops=%lu\n",
+                  (int)rr, LS_NAME[st], (unsigned long)bcLoops);
+  } else {
+    Serial.printf("[hang] cold boot (reason=%d)\n", (int)rr);
+  }
+  bcMagic = BC_MAGIC; bcStage = 0; bcLoops = 0;
+
   Wire.begin(IIC_SDA, IIC_SCL, 400000);
   powerInit(Wire);
   dispOk = gfx.begin();
@@ -1510,8 +1561,10 @@ void loop() {
   // and thus the software WDT, alive). The loop-WDT is auto-fed by the core
   // on each loop() return; this only needs to feed the chip-side one.
   powerFeedWatchdog();
+  bcLoops++;
 
   // ── backend pump ──
+  bc(LS_DATAPOLL);
   dataPoll(&tama);
   if (statsPollLevelUp()) triggerOneShot(P_CELEBRATE, 3000);
 
@@ -1546,6 +1599,7 @@ void loop() {
   }
 
   // ── IMU polling: shake → DIZZY, face-down → nap (3i.5) ──
+  bc(LS_IMU);
   if (now - lastShakeCheckMs > 50) {
     lastShakeCheckMs = now;
     float ax = 0, ay = 0, az = 0;
@@ -1593,6 +1647,7 @@ void loop() {
   // means the screensaver face would take over here — gated by the
   // screensaver setting. Recomputed at render time too (display state can
   // change via gestures in between), so keep it side-effect free.
+  bc(LS_AUTOOFF);
   bool inPromptNow = tama.promptId[0] && !responseSent;
   auto parkedClockable = [&]() {
     return (uiState == UI_NORMAL) && (displayMode == DISP_NORMAL)
@@ -1613,6 +1668,7 @@ void loop() {
   }
 
   // ── BLE passkey arrival: wake and beep (3i.5) ──
+  bc(LS_BLE);
   uint32_t pk = blePasskey();
   if (pk && !lastPasskey) {
     wake();
@@ -1622,6 +1678,7 @@ void loop() {
   lastPasskey = pk;
 
   // ── physical buttons (parallel to touch) ──
+  bc(LS_BUTTONS);
   BootEvent be = pollBoot();
   PwronEvent pw = powerPollButton();
   if (pw != PWRON_NONE || be != BOOT_NONE) {
@@ -1654,6 +1711,7 @@ void loop() {
   }
 
   // ── touch dispatch ──
+  bc(LS_TOUCH);
   gestureUpdate();
   GestureEvent ev = gestureGet();
   bool inPrompt = tama.promptId[0] && !responseSent;
@@ -1734,6 +1792,7 @@ void loop() {
   // ── render ──
   if (!dispOk || now < nextDraw) { delay(8); return; }
   nextDraw = now + 200;
+  bc(LS_RENDER);
 
   // Clock face takes over the home view when the device is parked: RTC
   // synced, no live work, no prompt, no menu, in DISP_NORMAL — and only
@@ -1767,6 +1826,7 @@ void loop() {
     default: break;
   }
 
+  bc(LS_PUSH);
   gfx.pushSprite();
   delay(8);
 }
