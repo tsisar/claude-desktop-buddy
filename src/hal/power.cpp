@@ -1,21 +1,21 @@
 #include "power.h"
+#include "pmu.h"
+#include "battery.h"
 #include "expander.h"
 #include "../board_pins.h"
 #include <Arduino.h>
 #include <Wire.h>
 #include <XPowersLib.h>
 
-// AXP2101-backed power HAL. See power.h for the why.
+// AXP2101-backed power HAL. See power.h for the why. This file owns bringing
+// the PMU up (display rails, PWRON button); the cell's charge profile and
+// runtime readouts live in battery.cpp, which reaches the same chip via axp().
 
 static XPowersPMU pmu;
 static bool       ok = false;
 
-// Battery charge current. The installed cell is 350 mAh. LiPo best practice is
-// to charge at ~0.5C for longevity (0.5–1C is the safe band; >1C shortens life,
-// and the vendor's 400 mA / upstream's 500 mA are ~1.1–1.4C here — too hot for
-// this pack). 0.5C of 350 mAh = 175 mA, which the AXP2101 supports exactly.
-// Drop to _150MA for an even cooler/gentler charge; never go above _350MA (1C).
-static constexpr uint8_t CHARGE_CURRENT = XPOWERS_AXP2101_CHG_CUR_175MA;
+// Shared AXP2101 accessor for battery.cpp (declared in pmu.h).
+XPowersPMU& axp() { return pmu; }
 
 bool powerInit(TwoWire& w) {
   ok = pmu.begin(w, AXP2101_SLAVE_ADDRESS, IIC_SDA, IIC_SCL);
@@ -48,33 +48,10 @@ bool powerInit(TwoWire& w) {
   expanderInit(w);
   expanderResetPulse();
 
-  // Battery fuel-gauge + ADC channels, so the telemetry getters below work.
-  pmu.enableBattDetection();              // PMU must know a cell is present...
-  pmu.enableBattVoltageMeasure();
-  pmu.enableVbusVoltageMeasure();
-  pmu.enableSystemVoltageMeasure();
-
-  // Charger configuration. Without this the AXP2101 runs on whatever its
-  // registers happened to hold, which is how a "100%" cell could drain flat
-  // on a 30-min trip and then refuse to boot from battery alone (deep
-  // discharge → only VBUS can re-trigger power-on).
-  pmu.setChargeTargetVoltage(XPOWERS_AXP2101_CHG_VOL_4V2);   // 4.2V cut-off
-  pmu.setPrechargeCurr(XPOWERS_AXP2101_PRECHARGE_50MA);
-  pmu.setChargerConstantCurr(CHARGE_CURRENT);
-  pmu.setChargerTerminationCurr(XPOWERS_AXP2101_CHG_ITERM_25MA);
-  // Cap how much we pull from the USB port so a weak source stays stable.
-  pmu.setVbusCurrentLimit(XPOWERS_AXP2101_VBUS_CUR_LIM_500MA);
-
-  // Under-voltage protection. If the rail sags this low the PMU pulls the
-  // plug rather than browning out the ESP32 mid-write.
-  pmu.setSysPowerDownVoltage(2600);
-  pmu.setLowBatWarnThreshold(15);         // %, fires the low-batt IRQ
-  pmu.setLowBatShutdownThreshold(5);      // %, PMU auto-shuts down here
-
-  // Enable the coulomb-counter fuel gauge. THIS is what makes
-  // getBatteryPercent() report the real charge — without it the gauge
-  // register holds its power-on default (100), so every cell reads full.
-  pmu.fuelGaugeControl(true, true);
+  // Cell charge profile, fuel gauge and battery/USB ADC channels. Lives in
+  // battery.cpp now; must run here, after the PMU is up, for the telemetry
+  // getters and the coulomb-counter to work.
+  batteryConfigCharger();
 
   // PWRON IRQ — short / long press latched in the chip's status reg so the
   // main loop can poll powerPollButton() at any rate without losing events.
@@ -86,22 +63,6 @@ bool powerInit(TwoWire& w) {
 }
 
 bool powerOk() { return ok; }
-
-int batteryMilliVolts() {
-  if (!ok) return 0;
-  return (int)pmu.getBattVoltage();        // mV
-}
-
-int batteryPercent() {
-  if (!ok) return 0;
-  int pct = pmu.getBatteryPercent();       // -1 if not yet known
-  if (pct < 0) pct = 0;
-  if (pct > 100) pct = 100;
-  return pct;
-}
-
-bool onUsb()    { return ok && pmu.isVbusIn(); }
-bool charging() { return ok && pmu.isCharging(); }
 
 PwronEvent powerPollButton() {
   if (!ok) return PWRON_NONE;

@@ -5,6 +5,7 @@
 #include <mbedtls/base64.h>
 #include "hal/storage.h"
 #include "hal/power.h"
+#include "hal/battery.h"
 #include "ble_bridge.h"
 #include "stats.h"
 #include "buddy.h"

@@ -33,6 +33,7 @@
 #include "board_pins.h"
 #include "hal/display.h"
 #include "hal/power.h"
+#include "hal/battery.h"
 #include "hal/audio.h"
 #include "hal/imu.h"
 #include "hal/rtc.h"
