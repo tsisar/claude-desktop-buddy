@@ -17,6 +17,7 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLESecurity.h>
+#include <host/ble_store.h>   // ble_store_clear() — wipe NimBLE bonds on unpair
 #include <Arduino.h>
 #include <string.h>
 
@@ -27,6 +28,12 @@
 static const size_t RX_CAP = 2048;
 static uint8_t  rxBuf[RX_CAP];
 static volatile size_t rxHead = 0, rxTail = 0;
+// rxHead is advanced by the NimBLE host task (onWrite callback); rxTail by the
+// main loop (bleRead). On the dual-core ESP32-S3 those run on different cores,
+// so the head/tail updates need a real lock — `volatile` alone doesn't make the
+// index updates atomic across cores. portMUX is the standard ESP32 spinlock for
+// task↔task shared state; the critical sections here only copy a few bytes.
+static portMUX_TYPE rxMux = portMUX_INITIALIZER_UNLOCKED;
 
 static BLEServer*         server = nullptr;
 static BLECharacteristic* txChar = nullptr;
@@ -37,12 +44,14 @@ static volatile uint32_t  passkey = 0;
 static volatile uint16_t  mtu = 23;
 
 static void rxPush(const uint8_t* p, size_t n) {
+  portENTER_CRITICAL(&rxMux);
   for (size_t i = 0; i < n; i++) {
     size_t next = (rxHead + 1) % RX_CAP;
-    if (next == rxTail) return;   // full — drop
+    if (next == rxTail) break;   // full — drop the rest
     rxBuf[rxHead] = p[i];
     rxHead = next;
   }
+  portEXIT_CRITICAL(&rxMux);
 }
 
 class RxCallbacks : public BLECharacteristicCallbacks {
@@ -128,17 +137,29 @@ bool bleSecure()    { return secure; }
 uint32_t blePasskey() { return passkey; }
 
 void bleClearBonds() {
-  // NimBLE clears bonds via the host store (ble_store_clear); wire that up
-  // when porting factory-reset. Not needed for the pairing bring-up.
-  Serial.println("[ble] bleClearBonds: not implemented on NimBLE yet");
+  // Wipe every persisted bond/CCCD from the NimBLE host store. Without this,
+  // "unpair" / factory-reset acked success but the desktop could reconnect
+  // with no fresh passkey — the bond survived in NVS. ble_store_clear() drops
+  // them all; the next connection has to re-pair from scratch.
+  int rc = ble_store_clear();
+  Serial.printf("[ble] cleared bonds (ble_store_clear rc=%d)\n", rc);
 }
 
-size_t bleAvailable() { return (rxHead + RX_CAP - rxTail) % RX_CAP; }
+size_t bleAvailable() {
+  portENTER_CRITICAL(&rxMux);
+  size_t a = (rxHead + RX_CAP - rxTail) % RX_CAP;
+  portEXIT_CRITICAL(&rxMux);
+  return a;
+}
 
 int bleRead() {
-  if (rxHead == rxTail) return -1;
-  int b = rxBuf[rxTail];
-  rxTail = (rxTail + 1) % RX_CAP;
+  portENTER_CRITICAL(&rxMux);
+  int b = -1;
+  if (rxHead != rxTail) {
+    b = rxBuf[rxTail];
+    rxTail = (rxTail + 1) % RX_CAP;
+  }
+  portEXIT_CRITICAL(&rxMux);
   return b;
 }
 
