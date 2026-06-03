@@ -189,9 +189,12 @@ struct Settings {
   bool hud;
   uint8_t clockRot;  // 0=auto 1=portrait 2=landscape
   bool battery;      // show the battery widget on home / clock
+  bool screensaver;  // show the full-screen clock face when idle on USB;
+                     // off ⇒ behave as if the RTC were never set (no face,
+                     // battery still just sleeps)
 };
 
-static Settings _settings = { true, true, false, true, true, 0, true };
+static Settings _settings = { true, true, false, true, true, 0, true, true };
 
 inline void settingsLoad() {
   _prefs.begin("buddy", true);
@@ -203,6 +206,7 @@ inline void settingsLoad() {
   _settings.clockRot = _prefs.getUChar("s_crot", 0);
   if (_settings.clockRot > 2) _settings.clockRot = 0;
   _settings.battery = _prefs.getBool("s_bat", true);
+  _settings.screensaver = _prefs.getBool("s_scrn", true);
   _prefs.end();
 }
 
@@ -215,6 +219,7 @@ inline void settingsSave() {
   _prefs.putBool("s_hud", _settings.hud);
   _prefs.putUChar("s_crot", _settings.clockRot);
   _prefs.putBool("s_bat", _settings.battery);
+  _prefs.putBool("s_scrn", _settings.screensaver);
   _prefs.end();
 }
 

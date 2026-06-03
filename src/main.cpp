@@ -53,6 +53,7 @@ bool buddyMode    = true;    // ASCII species mode is the boot default
 bool gifAvailable = false;   // flipped to true when characterInit succeeds
 
 #include "character.h"      // characterInit/Close/Tick/SetState/Loaded
+#include "clock.h"          // clockDrawWidget/clockDrawFace — clock UI
 #include "xfer.h"           // xferCommand() — calls characterInit on char_end
 
 // Non-static so character.cpp can reach it via extern. Everything
@@ -366,8 +367,7 @@ static void drawTranscript() {
   gfx.setTextDatum(TL_DATUM);
 }
 
-static void drawBatteryWidget(int bx, int by);   // body lives further down
-static void drawClockWidget(int x, int y);       // body near drawBatteryWidget
+void drawBatteryWidget(int bx, int by);          // non-static: clock.cpp overlays it
 
 // Install progress card: shown over the buddy while xfer.h is mid-transfer.
 // Replaces the buddy view so the user knows they should leave the desktop
@@ -417,7 +417,7 @@ static void drawHome() {
   }
   if (settings().hud) drawHUD();   // "transcript" setting gates the HUD
   drawBatteryWidget(W - 14 - 14 - SAFE, 14 + SAFE);   // top-right, alongside the buddy
-  drawClockWidget(SAFE + 2, 14 + SAFE + 17);          // top-left, mirrors the battery
+  clockDrawWidget(SAFE + 2, 14 + SAFE + 17);          // top-left, mirrors the battery
 }
 
 // ── approval screen (3i.2) ─────────────────────────────────────────────────
@@ -434,7 +434,7 @@ static void drawApproval() {
     buddyTick(P_ATTENTION);
   }
   drawBatteryWidget(W - 14 - 14 - SAFE, 14 + SAFE);   // top-right, same as home
-  drawClockWidget(SAFE + 2, 14 + SAFE + 17);          // top-left, mirrors the battery
+  clockDrawWidget(SAFE + 2, 14 + SAFE + 17);          // top-left, mirrors the battery
 
   // ── approval card (bottom third) ──
   const int cardTop = 296;
@@ -504,12 +504,9 @@ static void drawApproval() {
   }
 }
 
-// ── clock face / PET / INFO drawing (3i.4) ─────────────────────────────────
-
-static const char* const MON[] = {
-  "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"
-};
-static const char* const DOW[] = { "Sun","Mon","Tue","Wed","Thu","Fri","Sat" };
+// ── battery widget / PET / INFO drawing (3i.4) ─────────────────────────────
+// The clock widget + full-screen clock face moved to clock.{h,cpp}; the face
+// still calls drawBatteryWidget() below (kept non-static for that reason).
 
 // Battery widget: tiny 12×28 vertical icon (tip up) with proportional fill
 // rising from the bottom, plus percentage text to the left at body centre.
@@ -519,7 +516,7 @@ static const char* const DOW[] = { "Sun","Mon","Tue","Wed","Thu","Fri","Sat" };
 //
 // Colour signals: yellow = actively charging, green = healthy, orange =
 // low, red = critical.
-static void drawBatteryWidget(int bx, int by) {
+void drawBatteryWidget(int bx, int by) {
   if (!settings().battery) return;   // "battery" setting hides the widget
   int pct = batteryPercent();
   bool chg = charging();
@@ -547,58 +544,6 @@ static void drawBatteryWidget(int bx, int by) {
   char b[8]; snprintf(b, sizeof(b), "%d%%", pct);
   gfx.drawString(b, bx - 6, by + tipH + bh / 2);
   gfx.setTextDatum(TL_DATUM);
-}
-
-// Clock widget: HH:MM in the top-left corner, mirroring the battery widget on
-// the right. (x,y) is the middle-left anchor — same baseline as the battery %.
-// Only shown once the RTC holds a real (bridge-synced) time, so we never flash
-// a cold-boot 00:00. Gated by the same "battery" setting that hides its twin.
-static void drawClockWidget(int x, int y) {
-  if (!settings().battery) return;
-  RtcTime tm;
-  if (!dataRtcValid() || !rtcGetTime(&tm)) return;
-  char hm[6]; snprintf(hm, sizeof(hm), "%02u:%02u", tm.Hours, tm.Minutes);
-  gfx.setTextSize(2);
-  gfx.setTextColor(0xFFFF, 0x0000);
-  gfx.setTextDatum(ML_DATUM);
-  gfx.drawString(hm, x, y);
-  gfx.setTextDatum(TL_DATUM);
-}
-
-// Shown when on USB power, no live work, no prompt, no menu, and the RTC
-// has been time-synced by the bridge. Replaces the home view entirely
-// (buddy peek is dropped for stage 3i.4 — full-screen clock is plenty for
-// a desk-pet at rest).
-static void drawClock() {
-  gfx.fillSprite(0x0000);
-  RtcTime tm; RtcDate dt;
-  if (!rtcGetTime(&tm) || !rtcGetDate(&dt)) return;
-  // Battery widget is now drawn globally in the loop after the main view,
-  // so the clock no longer paints it locally.
-
-  char hm[6]; snprintf(hm, sizeof(hm), "%02u:%02u", tm.Hours, tm.Minutes);
-  // Seconds on their own row — drop the leading colon (it only made sense
-  // when they used to sit inline after the minutes).
-  char ss[3]; snprintf(ss, sizeof(ss), "%02u", tm.Seconds);
-  uint8_t mi = (dt.Month >= 1 && dt.Month <= 12) ? dt.Month - 1 : 0;
-  char dl[20];
-  snprintf(dl, sizeof(dl), "%s %s %02u",
-           DOW[dt.WeekDay % 7], MON[mi], dt.Date);
-
-  gfx.setTextDatum(MC_DATUM);
-  gfx.setTextSize(8);
-  gfx.setTextColor(0xFFFF, 0x0000);
-  gfx.drawString(hm, W / 2, H / 2 - 40);
-
-  gfx.setTextSize(4);
-  gfx.setTextColor(0xC618, 0x0000);
-  gfx.drawString(ss, W / 2, H / 2 + 50);
-
-  gfx.setTextSize(3);
-  gfx.drawString(dl, W / 2, H / 2 + 110);
-  gfx.setTextDatum(TL_DATUM);
-
-  drawBatteryWidget(W - 14 - 14 - SAFE, 14 + SAFE);   // top-right
 }
 
 // Header strip shared by PET / INFO pages: title left, page counter right.
@@ -1079,7 +1024,8 @@ static void applyMainMenu(int idx) {
 
 // ── settings menu (3i.3) ───────────────────────────────────────────────────
 static const char* const SETTINGS_ITEMS[] = {
-  "brightness", "sound", "transcript", "battery", "ascii pet", "reset", "back",
+  "brightness", "sound", "transcript", "battery", "screensaver",
+  "ascii pet", "reset", "back",
 };
 static const int SETTINGS_N = sizeof(SETTINGS_ITEMS) / sizeof(SETTINGS_ITEMS[0]);
 // brightLevel itself is declared near the top of the file (drawInfoDevice
@@ -1106,7 +1052,8 @@ static void drawSettingsMenu() {
       case 1: boolish = true; boolval = s.sound; break;
       case 2: boolish = true; boolval = s.hud;   break;
       case 3: boolish = true; boolval = s.battery; break;
-      case 4: {
+      case 4: boolish = true; boolval = s.screensaver; break;
+      case 5: {
         // tri-state cycle: ASCII species 0..N-1 → GIF (if installed) → 0
         uint8_t total = buddySpeciesCount() + (gifAvailable ? 1 : 0);
         uint8_t pos   = buddyMode ? buddySpeciesIdx() + 1 : total;
@@ -1114,7 +1061,7 @@ static void drawSettingsMenu() {
         value = buf;
         break;
       }
-      // 8/reset and 9/back have no value column
+      // reset and back have no value column
     }
     uint16_t valueCol = 0x07E0;
     if (boolish) {
@@ -1152,14 +1099,15 @@ static void applySettings(int idx) {
     case 1: s.sound   = !s.sound;   break;
     case 2: s.hud     = !s.hud;     break;
     case 3: s.battery = !s.battery; break;
-    case 4:
+    case 4: s.screensaver = !s.screensaver; break;
+    case 5:
       // tri-state cycle: ASCII species 0..N-1 → GIF (if installed) → 0
       cycleSpecies(+1);
       return;
-    case 5:   // reset → open reset sub-menu
+    case 6:   // reset → open reset sub-menu
       enterState(UI_MENU_RESET);
       return;
-    case 6:   // back → main
+    case 7:   // back → main
       enterState(UI_MENU_MAIN);
       return;
   }
@@ -1718,11 +1666,14 @@ void loop() {
   // after IDLE_MS of no interaction, so the buddy gets the same grace period
   // it gets on battery before the panel sleeps. Mirror image of the
   // auto-screen-off above: USB parks to the clock, battery parks to dark.
+  // settings().screensaver gates the face: off ⇒ same as an unset RTC —
+  // on USB the home view just stays up, on battery the panel still sleeps
+  // via the auto-screen-off path above (which is what skips the face there).
   bool clocking = (uiState == UI_NORMAL)
                && (displayMode == DISP_NORMAL)
                && !inPrompt && !responseSent
                && tama.sessionsRunning == 0 && tama.sessionsWaiting == 0
-               && dataRtcValid() && onUsb()
+               && dataRtcValid() && onUsb() && settings().screensaver
                && (now - lastInteractMs > IDLE_MS);
 
   // Passkey takes priority over everything except an actual approval
@@ -1730,13 +1681,13 @@ void loop() {
   if      (inPrompt || responseSent) drawApproval();
   else if (blePasskey())             drawPasskey();
   else if (xferActive())             drawXferProgress();
-  else if (clocking)                 drawClock();
+  else if (clocking)                 clockDrawFace();
   else if (displayMode == DISP_TRANSCRIPT) drawTranscript();
   else if (displayMode == DISP_PET)  drawPet();
   else if (displayMode == DISP_INFO) drawInfo(btName);
   else                               drawHome();
-  // Battery widget is drawn locally inside drawClock() and drawPet() — see
-  // those functions. Home / INFO / approval / passkey skip it.
+  // Battery widget is drawn locally inside clockDrawFace() and drawPet() —
+  // see those functions. Home / INFO / approval / passkey skip it.
 
   switch (uiState) {
     case UI_MENU_MAIN:     drawMainMenu();     break;
