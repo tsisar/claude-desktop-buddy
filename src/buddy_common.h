@@ -31,6 +31,12 @@ void buddyPrintLine(const char* line, int yPx, uint16_t color, int xOff = 0);
 // Print N-line sprite block. yOffset is added to BUDDY_Y_BASE for the top row.
 void buddyPrintSprite(const char* const* lines, uint8_t nLines, int yOffset, uint16_t color, int xOff = 0);
 
+// Like buddyPrintSprite, but Unicode Block Elements (U+2580–U+259F) in the
+// art are filled as seamless rectangles instead of font glyphs (▐ ▛ █ ▜ ▌
+// ▘ ▝ …). Other characters fall back to the normal font, so a block body
+// can be mixed with ASCII faces. Use for block-art species.
+void buddyPrintBlocks(const char* const* lines, uint8_t nLines, int yOffset, uint16_t color, int xOff = 0);
+
 // Set sprite text color directly + cursor (for ad-hoc particle drawing).
 void buddySetCursor(int x, int y);
 void buddySetColor(uint16_t fg);

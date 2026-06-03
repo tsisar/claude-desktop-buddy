@@ -43,6 +43,7 @@
 #include "data.h"          // pulls in stats.h
 #include "buddy.h"
 #include "buddy_common.h"
+#include "blockart.h"
 #include "gesture.h"
 #include "debug.h"
 
@@ -88,6 +89,14 @@ void buddyPrintSprite(const char* const* lines, uint8_t n, int yOffset, uint16_t
   int yBase = BUDDY_Y_BASE * SCALE - (SCALE - 1) * 14;
   for (uint8_t i = 0; i < n; i++)
     buddyPrintLine(lines[i], yBase + (yOffset + i*BUDDY_CHAR_H)*SCALE, color, xOff);
+}
+void buddyPrintBlocks(const char* const* lines, uint8_t n, int yOffset, uint16_t color, int xOff) {
+  int yBase = BUDDY_Y_BASE * SCALE - (SCALE - 1) * 14;
+  for (uint8_t i = 0; i < n; i++)
+    blockart::drawLineCentered(gfx, lines[i],
+                               BUDDY_X_CENTER + xOff * SCALE,
+                               yBase + (yOffset + i*BUDDY_CHAR_H)*SCALE,
+                               SCALE, color, BUDDY_BG);
 }
 void buddySetCursor(int x, int y) { gfx.setCursor(BUDDY_X_CENTER + (x-BUDDY_X_CENTER)*SCALE, y*SCALE); }
 void buddySetColor(uint16_t fg) { gfx.setTextColor(fg, BUDDY_BG); }
