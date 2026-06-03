@@ -208,6 +208,9 @@ static const uint32_t DOUBLE_TAP_MS = 400;  // max gap between the two taps
 // clock face, on battery the panel turns off. Any input (touch / button /
 // shake / new prompt) resets it via wake().
 static const uint32_t IDLE_MS = 30000;
+// On battery the screensaver clock face shows for this long after IDLE_MS,
+// then the panel turns off to save charge. On USB the face stays up.
+static const uint32_t BATTERY_CLOCK_MS = 60000;
 
 static uint8_t derive(const TamaState& s) {
   if (!s.connected)           return P_IDLE;
@@ -1572,11 +1575,24 @@ void loop() {
   }
 
   // ── auto screen-off after idle (3i.5) ──
-  // Only when on battery — on USB the clock face wants to stay visible.
-  // Skipped during prompt (the user is mid-decision).
+  // Skipped during prompt (the user is mid-decision). Parked & clockable
+  // means the screensaver face would take over here — gated by the
+  // screensaver setting. Recomputed at render time too (display state can
+  // change via gestures in between), so keep it side-effect free.
   bool inPromptNow = tama.promptId[0] && !responseSent;
+  auto parkedClockable = [&]() {
+    return (uiState == UI_NORMAL) && (displayMode == DISP_NORMAL)
+        && !inPromptNow && !responseSent
+        && tama.sessionsRunning == 0 && tama.sessionsWaiting == 0
+        && dataRtcValid() && settings().screensaver;
+  };
+  // On USB the clock face wants to stay visible, so never auto-off there.
+  // On battery the panel turns off after IDLE_MS — but if the screensaver
+  // is on, the clock face first gets BATTERY_CLOCK_MS of screen time before
+  // the panel sleeps.
+  uint32_t offAt = parkedClockable() ? IDLE_MS + BATTERY_CLOCK_MS : IDLE_MS;
   if (screenOn && !napping && !inPromptNow && !onUsb()
-      && (now - lastInteractMs > IDLE_MS)) {
+      && (now - lastInteractMs > offAt)) {
     screenOn = false;
     applyBrightness();
     Serial.println("[3i.5] auto screen-off");
@@ -1705,20 +1721,16 @@ void loop() {
   if (!dispOk || now < nextDraw) { delay(8); return; }
   nextDraw = now + 200;
 
-  // Clock face takes over the home view when the device is parked: on USB,
-  // RTC synced, no live work, no prompt, no menu, in DISP_NORMAL — and only
-  // after IDLE_MS of no interaction, so the buddy gets the same grace period
-  // it gets on battery before the panel sleeps. Mirror image of the
-  // auto-screen-off above: USB parks to the clock, battery parks to dark.
-  // settings().screensaver gates the face: off ⇒ same as an unset RTC —
-  // on USB the home view just stays up, on battery the panel still sleeps
-  // via the auto-screen-off path above (which is what skips the face there).
-  bool clocking = (uiState == UI_NORMAL)
-               && (displayMode == DISP_NORMAL)
-               && !inPrompt && !responseSent
-               && tama.sessionsRunning == 0 && tama.sessionsWaiting == 0
-               && dataRtcValid() && onUsb() && settings().screensaver
-               && (now - lastInteractMs > IDLE_MS);
+  // Clock face takes over the home view when the device is parked: RTC
+  // synced, no live work, no prompt, no menu, in DISP_NORMAL — and only
+  // after IDLE_MS of no interaction. settings().screensaver gates it (off ⇒
+  // same as an unset RTC: on USB the home view stays up, on battery the
+  // panel sleeps via the auto-screen-off path above). On USB the face stays
+  // up indefinitely; on battery it shows for BATTERY_CLOCK_MS, then the
+  // auto-screen-off above blanks the panel (and this goes false in step).
+  bool clocking = parkedClockable()
+               && (now - lastInteractMs > IDLE_MS)
+               && (onUsb() || (now - lastInteractMs <= IDLE_MS + BATTERY_CLOCK_MS));
 
   // Passkey takes priority over everything except an actual approval
   // prompt — the user has 30s to type the code into the desktop.
