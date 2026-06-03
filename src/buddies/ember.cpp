@@ -96,27 +96,23 @@ static void doIdle(uint32_t t) {
   buddyPrintBlocks(P[pose], 3, BOB[beat] + DROP, TERRA, xOff);
 }
 
-// ─── BUSY ───  taller focused flame, fast flicker, dot ticker, sparks
+// ─── BUSY ───  the FL_* flame tongue (all 4 frames, lively flicker) over a
+// stretching body, plus the "working" dot ticker. Kept deliberately clean —
+// no asterisk "spark" and no rising particles crowding the flame.
 static void doBusy(uint32_t t) {
   const char* const* P[3] = { STRETCH, TALL, EYES };
   static const uint8_t SEQ[] = { 0,1,0,1, 2,2, 0,1,0,1, 1,0 };
   uint8_t beat = (t / 3) % sizeof(SEQ);
   buddyPrintBlocks(P[SEQ[beat]], 3, -1 + DROP, TERRA);
 
-  // hot, fast flame
-  static const char* const* const FF[2] = { FL_HI, FL_L };
-  buddyPrintBlocks(FF[t & 1], 2, -1 - 16, EMBER_HOT);
+  // The flickering flame tongue (L → HI → R → LO).
+  flame(t, -1);
 
+  // "working" dot ticker
   static const char* const DOTS[] = { ".  ", ".. ", "...", " ..", "  .", "   " };
   buddySetColor(BUDDY_WHITE);
   buddySetCursor(BUDDY_X_CENTER + 22, BUDDY_Y_OVERLAY + 14);
   buddyPrint(DOTS[t % 6]);
-
-  // a rising spark inside the flame
-  int b = (t / 2) % 8;
-  buddySetColor(SPARK);
-  buddySetCursor(BUDDY_X_CENTER - 1, BUDDY_Y_OVERLAY + 16 - b);
-  buddyPrint(b < 6 ? "*" : " ");
 }
 
 // ─── ATTENTION ───  bolt upright, wide eyes, "!" pulses, tense shimmy
