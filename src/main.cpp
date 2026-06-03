@@ -1482,6 +1482,13 @@ void setup() {
   snprintf(btName, sizeof(btName), "Claude-%02X%02X", mac[4], mac[5]);
   bleInit(btName);
 
+  // Second-rung watchdog: subscribe loop() to the ESP32 task WDT (~5s). The
+  // core auto-feeds it on each loop() return, so a healthy loop never trips
+  // it; a software stall the AXP2101 WDT can't see (warm hangs where the chip
+  // is still ACKed) gets a panic-reboot here. The AXP2101 hardware WDT armed
+  // in powerInit() remains the primary recovery for a fully wedged board.
+  enableLoopWDT();
+
   Serial.printf("[3i.4] disp=%d touch=%d imu=%d rtc=%d pmu=%d  name=%s\n",
                 dispOk, touchOk(), imuOk(), rtcOk(), powerOk(), btName);
   Serial.printf("[3i.4] audio ok=%d  sound=%d\n", audioOk(), settings().sound);
@@ -1496,6 +1503,13 @@ void setup() {
 void loop() {
   static uint32_t nextDraw = 0;
   uint32_t now = millis();
+
+  // Pet both watchdogs every pass. The AXP2101 hardware WDT (8s) is the real
+  // backstop — it power-cycles the board if the loop wedges in a way the
+  // ESP32 loop-WDT can't catch (a yielding FreeRTOS wait keeps the IDLE task,
+  // and thus the software WDT, alive). The loop-WDT is auto-fed by the core
+  // on each loop() return; this only needs to feed the chip-side one.
+  powerFeedWatchdog();
 
   // ── backend pump ──
   dataPoll(&tama);

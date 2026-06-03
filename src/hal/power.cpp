@@ -59,10 +59,32 @@ bool powerInit(TwoWire& w) {
   pmu.clearIrqStatus();
   pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ |
                 XPOWERS_AXP2101_PKEY_LONG_IRQ);
+
+  // Hard power-off on a sustained PWRON hold, done in the CHIP so it works
+  // even when the firmware is wedged. The old code assumed the AXP2101 did
+  // this on defaults — it does not unless we set it. 6s hold → rails off.
+  pmu.setPowerKeyPressOffTime(XPOWERS_POWEROFF_6S);
+  pmu.setLongPressPowerOFF();
+
+  // Hardware watchdog: the AXP2101 power-cycles the board if powerFeedWatchdog()
+  // stops being called. This is the only recovery path from a firmware hang
+  // that doesn't need a battery pull — the ESP32 loop-WDT can't catch a stall
+  // inside a yielding FreeRTOS wait, but this chip-side timer always will.
+  // 8s timeout, configured to reset the PMU and drop DCDC/LDO + PWROK so the
+  // ESP32 gets a clean cold boot, not just a warm reset.
+  pmu.setWatchdogTimeout(XPOWERS_AXP2101_WDT_TIMEOUT_8S);
+  pmu.setWatchdogConfig(XPOWERS_AXP2101_WDT_IRQ_AND_RSET_ALL_OFF);
+  pmu.clrWatchdog();      // start from a clean count
+  pmu.enableWatchdog();
   return true;
 }
 
 bool powerOk() { return ok; }
+
+void powerFeedWatchdog() {
+  if (!ok) return;
+  pmu.clrWatchdog();
+}
 
 PwronEvent powerPollButton() {
   if (!ok) return PWRON_NONE;

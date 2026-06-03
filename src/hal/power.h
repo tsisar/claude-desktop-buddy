@@ -27,10 +27,19 @@ bool powerOk();
 // them, and returns the same intent in a typed enum. Call from the main
 // loop; safe at any rate (the chip latches between calls).
 //
-// Hardware-level hard-power-off on a sustained hold is handled by the
-// AXP2101 itself, same as the M5's AXP192 — nothing extra to do here.
+// Hardware-level hard-power-off on a sustained hold: powerInit() now arms
+// the AXP2101's own long-press → PWROFF (setLongPressPowerOFF + a 6s off
+// time), so holding PWRON cuts the rails in hardware even if the firmware
+// is wedged. PWRON_LONG can therefore stay unhandled in the loop.
 enum PwronEvent : uint8_t { PWRON_NONE = 0, PWRON_SHORT = 1, PWRON_LONG = 2 };
 PwronEvent powerPollButton();
+
+// Pet the AXP2101 hardware watchdog. powerInit() arms an 8s watchdog set to
+// reset-and-power-cycle the board; the main loop MUST call this every pass
+// so a healthy loop never trips it. If the loop ever wedges (I2C stall, BLE
+// stall, display desync) the watchdog fires and the board recovers on its
+// own — no battery pull. Safe no-op until powerInit() succeeds.
+void powerFeedWatchdog();
 
 // Screen on/off is NOT a rail toggle on this board: the panel runs on the
 // AXP2101 power-on defaults (see docs/device-power-map.md), and ALDO1 is the
