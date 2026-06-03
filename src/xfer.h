@@ -54,6 +54,25 @@ static void _xAck(const char* what, bool ok, uint32_t n = 0) {
   bleWrite((const uint8_t*)b, len);
 }
 
+// Accept only a plain single-path-segment name from the (untrusted) BLE/USB
+// peer: [A-Za-z0-9._-], non-empty, not "." / "..", short enough to fit our
+// fixed path buffers. Blocks path traversal ("../etc"), absolute paths and
+// separators — without this, `name`/`path` flow straight into snprintf'd
+// filesystem paths. Char packs are flat (no subdirs), so one segment is enough.
+static bool _xSafeName(const char* s, size_t maxLen) {
+  if (!s || !*s) return false;
+  size_t n = 0;
+  for (const char* c = s; *c; c++, n++) {
+    char ch = *c;
+    bool ok = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+              (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-';
+    if (!ok) return false;
+  }
+  if (n >= maxLen) return false;
+  if (strcmp(s, ".") == 0 || strcmp(s, "..") == 0) return false;
+  return true;
+}
+
 // Recursively remove a directory's contents (one level deep — char packs
 // don't nest). Returns total bytes reclaimed.
 static uint32_t _xWipeDir(const char* dir) {
@@ -164,6 +183,13 @@ inline bool xferCommand(JsonDocument& doc) {
     const char* name = doc["name"] | "pet";
     _xTotal = doc["total"] | 0;
 
+    // Validate the pack name BEFORE wiping anything — a bad/hostile name must
+    // not cost the currently-installed pack or escape /characters/.
+    if (!_xSafeName(name, sizeof(_xCharName))) {
+      _xAck("char_begin", false);
+      return true;
+    }
+
     // Fit check BEFORE touching the filesystem so a failed sizing leaves
     // whatever's currently installed intact.
     uint64_t free       = storageTotalBytes() - storageUsedBytes();
@@ -221,6 +247,9 @@ inline bool xferCommand(JsonDocument& doc) {
     _xExpected = doc["size"] | 0;
     _xWritten = 0;
     if (!path) { _xAck("file", false); return true; }
+    // Same single-segment guard as the pack name: no "..", no separators, so
+    // the file can't escape this pack's directory.
+    if (!_xSafeName(path, 64)) { _xAck("file", false); return true; }
     char full[96];
     snprintf(full, sizeof(full), "/characters/%s/%s", _xCharName, path);
     _xFile = storageFS().open(full, "w");
