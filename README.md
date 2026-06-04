@@ -69,7 +69,7 @@ If discovery isn't finding the stick:
 ## Controls
 
 |                         | Normal               | Pet         | Info        | Approval    |
-| ----------------------- | -------------------- | ----------- | ----------- | ----------- |
+|-------------------------|----------------------|-------------|-------------|-------------|
 | **A** (front)           | next screen          | next screen | next screen | **approve** |
 | **B** (right)           | scroll transcript    | next page   | next page   | **deny**    |
 | **Hold A**              | menu                 | menu        | menu        | menu        |
@@ -82,13 +82,7 @@ The screen auto-powers-off after 30s of no interaction (kept on while an
 approval prompt is up). Any button press wakes it.
 
 ## ASCII pets
-```
-  ▐▛███▜▌
- ▝▜█████▛▘
-   ▘▘ ▝▝
-```
 
-## ASCII pets
 ```
   ▐▛███▜▌
  ▝▜█████▛▘
@@ -98,6 +92,47 @@ approval prompt is up). Any button press wakes it.
 Eighteen pets, each with seven animations (sleep, idle, busy, attention,
 celebrate, dizzy, heart). Menu → "next pet" cycles them with a counter.
 Choice persists to NVS.
+
+### Block-art drawing palette
+
+Pet bodies are drawn with Unicode **Block Elements** (U+2580–U+259F).
+On-device they are not font glyphs — `src/blockart.cpp` fills each cell
+with exact rectangles, so adjacent blocks tile seamlessly. Compose art on
+a monospace grid (each character = one 6×8 cell, rendered 18×32 px); any
+non-block character falls back to the GFX font, so ASCII faces mix in
+freely. See `src/buddies/ember.cpp` for a worked example.
+
+| Glyphs            | Code                  | Coverage                               |
+|-------------------|-----------------------|----------------------------------------|
+| `█`               | U+2588                | full cell                              |
+| `▀` / `▄`         | U+2580 / 2584         | top / bottom half                      |
+| `▌` / `▐`         | U+258C / 2590         | left / right half                      |
+| `▁ ▂ ▃ ▄ ▅ ▆ ▇ █` | U+2581–2588           | bottom ⅛ … 8⁄8                         |
+| `▏ ▎ ▍ ▌ ▋ ▊ ▉ █` | U+258F→2588           | left ⅛ … 8⁄8                           |
+| `▔` / `▕`         | U+2594 / 2595         | top ⅛ / right ⅛                        |
+| `▘ ▝ ▖ ▗`         | U+2598/259D/2596/2597 | one quadrant: TL TR BL BR              |
+| `▚ ▞`             | U+259A / 259E         | diagonal pairs: TL+BR / TR+BL          |
+| `▛ ▜ ▙ ▟`         | U+259B/259C/2599/259F | three quadrants (notch at BR BL TR TL) |
+| `░ ▒ ▓`           | U+2591–2593           | 25 / 50 / 75 % shade (color blend)     |
+
+Quick recipes — think of each cell as four quadrants; the *missing*
+quadrant of `▛▜▙▟` (BR, BL, TR, TL respectively) is what rounds a corner:
+
+```
+rounded shoulders:   ▐▛████▜▌
+rounded base:        ▝▜████▛▘
+feet / toes:           ▘▘ ▝▝      single quadrants read as tiny feet
+flame tip:              ▗▟▖       quadrant + three-quadrant stack
+half-step outline:   ▗▄▄▄▄▄▄▖     eighths make soft slopes
+```
+
+Useful sources: [Wikipedia: Block Elements](https://en.wikipedia.org/wiki/Block_Elements),
+the official [Unicode chart PDF](https://www.unicode.org/charts/PDF/U2580.pdf).
+Print them all in a terminal:
+
+```sh
+python3 -c "print(''.join(chr(c) for c in range(0x2580, 0x25A0)))"
+```
 
 ## GIF pets
 
@@ -120,7 +155,11 @@ A character pack is a folder with `manifest.json` and 96px-wide GIFs:
   },
   "states": {
     "sleep": "sleep.gif",
-    "idle": ["idle_0.gif", "idle_1.gif", "idle_2.gif"],
+    "idle": [
+      "idle_0.gif",
+      "idle_1.gif",
+      "idle_2.gif"
+    ],
     "busy": "busy.gif",
     "attention": "attention.gif",
     "celebrate": "celebrate.gif",
@@ -152,7 +191,7 @@ If you're iterating on a character and would rather skip the BLE round-trip,
 ## The seven states
 
 | State       | Trigger                     | Feel                        |
-| ----------- | --------------------------- | --------------------------- |
+|-------------|-----------------------------|-----------------------------|
 | `sleep`     | bridge not connected        | eyes closed, slow breathing |
 | `idle`      | connected, nothing urgent   | blinking, looking around    |
 | `busy`      | sessions actively running   | sweating, working           |
@@ -188,7 +227,7 @@ makers and developers and isn't an officially supported product feature.
 Brand accent — the Claude terracotta orange, sampled from the desktop UI:
 
 | Name          | HEX       | RGB            | RGB565 (display) |
-| ------------- | --------- | -------------- | ---------------- |
+|---------------|-----------|----------------|------------------|
 | Claude orange | `#DE7643` | `222, 118, 67` | `0xDBA8`         |
 
 The display HAL works in 16-bit RGB565, so use `0xDBA8` in `gfx.*` calls
