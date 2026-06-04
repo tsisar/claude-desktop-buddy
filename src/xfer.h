@@ -45,6 +45,11 @@ bool characterInit(const char* name);
 extern bool buddyMode;
 extern bool gifAvailable;
 
+// Debug: hold a persona state on screen (test bridges' cmd:pose). Not part
+// of the desktop protocol — exists to eyeball buddy animations during art
+// work. Defined in main.cpp.
+void debugPose(uint8_t s, uint32_t durMs);
+
 // Which channel the line being dispatched arrived on — set by dataPoll()
 // before it feeds USB or BLE bytes into _applyJson. Replies go back to the
 // same channel: BLE acks over NUS (mirrored to Serial in verbose builds),
@@ -147,6 +152,25 @@ static uint32_t _xWipeAllChars() {
 inline bool xferCommand(JsonDocument& doc) {
   const char* cmd = doc["cmd"];
   if (!cmd) return false;
+
+  if (strcmp(cmd, "pose") == 0) {
+    // Debug-only: {"cmd":"pose","s":"heart","ms":6000} — s by name or 0-6.
+    static const char* const NAMES[] = {
+      "sleep", "idle", "busy", "attention", "celebrate", "dizzy", "heart"
+    };
+    int s = -1;
+    if (doc["s"].is<const char*>()) {
+      const char* n = doc["s"];
+      for (int i = 0; i < 7; i++)
+        if (strcmp(n, NAMES[i]) == 0) { s = i; break; }
+    } else if (doc["s"].is<int>()) {
+      s = doc["s"];
+    }
+    bool ok = (s >= 0 && s <= 6);
+    if (ok) debugPose((uint8_t)s, doc["ms"] | 5000);
+    _xAck("pose", ok);
+    return true;
+  }
 
   if (strcmp(cmd, "name") == 0) {
     const char* n = doc["name"];

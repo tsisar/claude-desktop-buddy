@@ -20,6 +20,8 @@ Usage:
   tools/usb_test_bridge.sh --scenario working
   tools/usb_test_bridge.sh --scenario prompt
   tools/usb_test_bridge.sh --scenario cycle
+  tools/usb_test_bridge.sh --scenario heart
+  tools/usb_test_bridge.sh --scenario pose --pose dizzy
   tools/usb_test_bridge.sh --port /dev/ttyACM0 --baud 115200
 """
 
@@ -197,6 +199,21 @@ class FakeBridge:
             )
             time.sleep(self.args.interval)
 
+    def scenario_pose(self):
+        """Hold one persona pose on screen via the debug cmd:pose — for
+        eyeballing buddy art (HEART normally flashes for only 2s after a
+        fast approve). Refreshed every interval so it stays up until ^C."""
+        name = self.args.pose
+        print(f"[bridge] holding pose '{name}' — Ctrl-C to exit")
+        while not self.stop:
+            self.send({"cmd": "pose", "s": name,
+                       "ms": int(self.args.interval * 3000)})
+            time.sleep(self.args.interval)
+
+    def scenario_heart(self):
+        self.args.pose = "heart"
+        self.scenario_pose()
+
     def scenario_levelup(self):
         """+10K tokens per heartbeat. 50K per level → CELEBRATE every ~10s."""
         i = 0
@@ -361,7 +378,12 @@ def main():
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--scenario", default="cycle",
                     choices=["idle", "working", "prompt", "cycle",
-                             "levelup", "long_hint", "cyrillic"])
+                             "levelup", "long_hint", "cyrillic",
+                             "heart", "pose"])
+    ap.add_argument("--pose", default="heart",
+                    choices=["sleep", "idle", "busy", "attention",
+                             "celebrate", "dizzy", "heart"],
+                    help="which pose --scenario pose holds on screen")
     ap.add_argument("--owner", default="LinuxDev")
     ap.add_argument("--interval", type=float, default=2.0)
     args = ap.parse_args()
@@ -400,6 +422,8 @@ def main():
         "levelup":   bridge.scenario_levelup,
         "long_hint": bridge.scenario_long_hint,
         "cyrillic":  bridge.scenario_cyrillic,
+        "heart":     bridge.scenario_heart,
+        "pose":      bridge.scenario_pose,
     }
     print(f"scenario: {args.scenario}  (Ctrl-C to stop)\n")
     try:

@@ -277,6 +277,16 @@ static void wake() {
   }
 }
 
+// Debug hook for the test bridges' cmd:pose (see xfer.h) — hold any persona
+// state on screen for buddy-art iteration, without faking the protocol
+// traffic that would naturally produce it (HEART, for one, normally shows
+// for only 2s after a fast approve).
+void debugPose(uint8_t s, uint32_t durMs) {
+  if (s > P_HEART) return;
+  triggerOneShot(s, durMs);
+  wake();   // relight the panel so the pose is actually visible
+}
+
 static void beep(uint16_t freq, uint16_t ms) {
   // TEMP: back to the original square-wave tone to test basic audibility.
   if (!settings().sound) return;
@@ -497,11 +507,12 @@ static void drawApproval() {
   // buddy can drop the global 32 px without crowding it.
   //
   // Geometry (368×448, SCALE 4, BUDDY_Y_SHIFT 32): the highest ATTENTION
-  // pixel is the "!" spark at logical y = BUDDY_Y_OVERLAY-8 → 24 px. A size-2
-  // banner at y=2 spans 2..18 px, clearing the spark by 6 px. Size 3 (→26 px)
-  // would collide, so keep it at size 2.
+  // pixel is the "!" spark at logical y = BUDDY_Y_OVERLAY+5-8 → 44 px (the
+  // marks sit 5 logical px below the classic overlay row exactly so this
+  // banner has room). A size-3 banner at y=2 spans 2..26 px, clearing the
+  // spark by 18 px; size 4 (→34 px) would get tight, so stop at 3.
   uint32_t waited = (millis() - promptArrivedMs) / 1000;
-  gfx.setTextSize(2);
+  gfx.setTextSize(3);
   gfx.setTextColor(waited >= 10 ? 0xFA20 : 0xC618, 0x0000);
   gfx.setTextDatum(TC_DATUM);
   char top[24]; snprintf(top, sizeof(top), "approve?  %lus", (unsigned long)waited);
