@@ -173,7 +173,7 @@ static void doBusy(uint32_t t) {
   buddyPrint(DOTS[t % 6]);
 }
 
-// ─── ATTENTION ───  startled, hot orange: hands up, eyes darting:
+// ─── ATTENTION ───  startled: hands up, eyes darting:
 //
 //      !            !       ALERT holds the base — both hands thrown up
 //     ▄▐▛███▜▌▄  !          beside the head; between pulses LOOK_L /
@@ -189,7 +189,7 @@ static void doAttention(uint32_t t) {
   // ALERT sits on a 10-cell grid — half a cell (-3) re-centers its body
   // onto the 9-cell grid the look poses use, so the body doesn't hop.
   int xOff = (pose == 0 ? -3 : 0) + ((t & 1) ? 1 : -1);   // jittery alertness
-  buddyPrintBlocks(P[pose], 3, -2 + DROP, EMBER_HOT, xOff);
+  buddyPrintBlocks(P[pose], 3, -2 + DROP, TERRA, xOff);
 
   // 5 logical px (20 screen px) below the classic overlay row — the top
   // strip is where the approval "approve? Ns" banner rides, and the "!"
@@ -224,7 +224,7 @@ static void doCelebrate(uint32_t t) {
   static const int8_t Y_JUMP[]  = { 1,-2,-7,-9,-7,-2, 1,-2,-7,-9,-7,-2, 1,1 };
   uint8_t beat = (t / 3) % sizeof(Y_JUMP);
   // -3: the dance poses live on a 10-cell grid (see the ATTENTION note).
-  buddyPrintBlocks(P[(t / 3) & 1], 3, Y_JUMP[beat] + DROP, EMBER_HOT, -3);
+  buddyPrintBlocks(P[(t / 3) & 1], 3, Y_JUMP[beat] + DROP, TERRA, -3);
 
   static const uint16_t cols[] = { SPARK, BUDDY_HEART, EMBER_HOT, TERRA, BUDDY_RED };
   for (int i = 0; i < 6; i++) {
