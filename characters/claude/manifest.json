@@ -1,0 +1,19 @@
+{
+  "name": "claude",
+  "colors": {
+    "body": "#D87656",
+    "bg": "#000000",
+    "text": "#FFFFFF",
+    "textDim": "#808080",
+    "ink": "#000000"
+  },
+  "states": {
+    "sleep": "loop.gif",
+    "idle": "loop.gif",
+    "busy": "loop.gif",
+    "attention": "loop.gif",
+    "celebrate": "loop.gif",
+    "dizzy": "loop.gif",
+    "heart": "loop.gif"
+  }
+}
