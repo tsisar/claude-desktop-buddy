@@ -501,28 +501,33 @@ static void drawApproval() {
   } else {
     buddyTick(P_ATTENTION);
   }
-  // No top HUD here (battery/clock are hidden during a prompt) — the buddy
-  // gets the full upper area. The "approve? Ns" countdown rides as a banner
-  // along the very top instead of in the old below-the-buddy slot, so the
-  // buddy can drop the global 32 px without crowding it.
-  //
-  // Geometry (368×448, SCALE 4, BUDDY_Y_SHIFT 32): the highest ATTENTION
-  // pixel is the "!" spark at logical y = BUDDY_Y_OVERLAY+5-8 → 44 px (the
-  // marks sit 5 logical px below the classic overlay row exactly so this
-  // banner has room). A size-3 banner at y=2 spans 2..26 px, clearing the
-  // spark by 18 px; size 4 (→34 px) would get tight, so stop at 3.
-  uint32_t waited = (millis() - promptArrivedMs) / 1000;
-  gfx.setTextSize(3);
-  gfx.setTextColor(waited >= 10 ? 0xFA20 : 0xC618, 0x0000);
-  gfx.setTextDatum(TC_DATUM);
-  char top[24]; snprintf(top, sizeof(top), "approve?  %lus", (unsigned long)waited);
-  gfx.drawString(top, W / 2, 2);
-  gfx.setTextDatum(TL_DATUM);
+  // Same top HUD as the home view — battery/clock stay visible during a
+  // prompt (a top banner there proved unreadable, so the corners are free).
+  drawBatteryWidget(W - 14 - 14 - SAFE, 14 + SAFE);   // top-right
+  if (settings().battery && dataRtcValid())
+    clockDrawWidget(SAFE + 2, 14 + SAFE + 17);        // top-left
 
   // ── approval card (bottom third) ──
   const int cardTop = 296;
   gfx.fillRect(0, cardTop, W, H - cardTop, 0x0000);   // mask any buddy bleed
   gfx.drawFastHLine(0, cardTop, W, 0x4208);
+
+  // "approve? Ns" countdown — right below the buddy, ABOVE the card line.
+  // It used to ride as a banner along the very top, but up there it fought
+  // the rounded glass and was hard to read. Mask its band first so a tall
+  // buddy frame can't bleed into the text.
+  uint32_t waited = (millis() - promptArrivedMs) / 1000;
+  gfx.fillRect(0, cardTop - 34, W, 34, 0x0000);
+  gfx.setTextSize(3);
+  // Faux bold: the band above is freshly masked black, so draw the string
+  // twice with a 1 px x-shift, transparent bg (the opaque-bg variant would
+  // erase the first pass).
+  gfx.setTextColor(waited >= 10 ? 0xFA20 : 0xC618);
+  gfx.setTextDatum(TC_DATUM);
+  char top[24]; snprintf(top, sizeof(top), "approve?  %lus", (unsigned long)waited);
+  gfx.drawString(top, W / 2, cardTop - 30);
+  gfx.drawString(top, W / 2 + 1, cardTop - 30);
+  gfx.setTextDatum(TL_DATUM);
 
   // Tool name — largest size whose pixel width fits, truncated with '~' if
   // even the smallest won't (avoids the off-screen wrap that garbled it).
