@@ -571,6 +571,20 @@ static void drawApproval() {
     gfx.setTextDatum(TL_DATUM);
   }
 
+  // Swipe-direction hints: slim glows on both edges the whole time the
+  // prompt is up — right green = approve, left red = deny — so it's
+  // obvious which way to swipe. Dimmer than the decision flash below
+  // (which overdraws them), and dropped once the answer is sent.
+  if (!responseSent) {
+    static const uint16_t hintG[3] = { 0x03E0, 0x01E0, 0x00C0 };
+    static const uint16_t hintR[3] = { 0x7800, 0x3800, 0x1800 };
+    const int step = 3;   // brightest band sits at the very edge
+    for (int k = 0; k < 3; k++) {
+      gfx.fillRect(W - (k + 1) * step, 0, step, H, hintG[k]);
+      gfx.fillRect(k * step, 0, step, H, hintR[k]);
+    }
+  }
+
   // Swipe feedback: a brief 3-step glow inward from the edge you swiped.
   if (decisionFlashSide != 0 && (int32_t)(millis() - decisionFlashUntil) < 0) {
     static const uint16_t green[3] = { 0x07E0, 0x03E0, 0x01E0 };
