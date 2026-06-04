@@ -45,13 +45,39 @@ bool characterInit(const char* name);
 extern bool buddyMode;
 extern bool gifAvailable;
 
+// Which channel the line being dispatched arrived on — set by dataPoll()
+// before it feeds USB or BLE bytes into _applyJson. Replies go back to the
+// same channel: BLE acks over NUS (mirrored to Serial in verbose builds),
+// USB acks over Serial UNCONDITIONALLY. Routing USB acks through VWRITE
+// was a bug: a non-verbose build swallowed every ack, so the device
+// processed tools/usb_xfer_send.py commands but the script timed out
+// waiting on silence.
+static bool _xFromUsb = false;
+inline void xferSetSource(bool fromUsb) { _xFromUsb = fromUsb; }
+
+static void _xReply(const char* b, int len) {
+  if (_xFromUsb) {
+    // Boot sets setTxTimeoutMs(0) so stray logs never block when no host
+    // is attached — but 0 also means "drop bytes when the TX ring is
+    // full". A dropped ack deadlocks the no-retry xfer protocol (host
+    // waits for the ack, we wait for the next command), so block briefly
+    // for protocol replies: answering a USB command implies a host is
+    // attached and draining.
+    Serial.setTxTimeoutMs(50);
+    Serial.write((const uint8_t*)b, len);
+    Serial.setTxTimeoutMs(0);
+  } else {
+    VWRITE(b, len);
+    bleWrite((const uint8_t*)b, len);
+  }
+}
+
 static void _xAck(const char* what, bool ok, uint32_t n = 0) {
   char b[64];
   int len = snprintf(b, sizeof(b),
     "{\"ack\":\"%s\",\"ok\":%s,\"n\":%lu}\n",
     what, ok ? "true" : "false", (unsigned long)n);
-  VWRITE(b, len);
-  bleWrite((const uint8_t*)b, len);
+  _xReply(b, len);
 }
 
 // Accept only a plain single-path-segment name from the (untrusted) BLE/USB
@@ -174,8 +200,7 @@ inline bool xferCommand(JsonDocument& doc) {
       (unsigned long long)fsFree, (unsigned long long)fsTotal,
       stats().approvals, stats().denials, statsMedianVelocity(),
       (unsigned long)stats().napSeconds, stats().level);
-    VWRITE(b, len);
-    bleWrite((const uint8_t*)b, len);
+    _xReply(b, len);
     return true;
   }
 
@@ -219,8 +244,7 @@ inline bool xferCommand(JsonDocument& doc) {
         (unsigned long long)available,
         (unsigned long)(_xTotal / 1024),
         (unsigned long long)(available / 1024));
-      VWRITE(b, len);
-      bleWrite((const uint8_t*)b, len);
+      _xReply(b, len);
       return true;
     }
 

@@ -92,6 +92,10 @@ inline void dataSetRtcValid(bool v) { _rtcValid = v; }
 // the inline definition in the single .cpp that includes xfer.h.
 bool xferCommand(JsonDocument& doc);
 
+// Tell xfer.h which channel the next dispatched line came from, so its
+// acks return on the same channel (USB → Serial, BLE → NUS).
+void xferSetSource(bool fromUsb);
+
 // Sanitise incoming text into the built-in 6x8 font's character set: strip
 // control bytes, pass ASCII through, romanise Cyrillic via _cyrillicTranslit,
 // map a few common punctuation marks, and fall back to '?' for anything else
@@ -182,7 +186,15 @@ static void _asciiCopy(char* dst, size_t dstLen, const char* src) {
 
 static void _applyJson(const char* line, TamaState* out) {
   JsonDocument doc;
-  if (deserializeJson(doc, line)) return;
+  DeserializationError jerr = deserializeJson(doc, line);
+  if (jerr) {
+    // A line that doesn't parse is a dropped/garbled byte on the wire.
+    // During an xfer the sender waits forever for an ack we'll never
+    // send, so make the failure visible instead of silently eating it.
+    Serial.printf("[data] json err: %s len=%u head=%.32s\n",
+                  jerr.c_str(), (unsigned)strlen(line), line);
+    return;
+  }
   if (xferCommand(doc)) { _lastLiveMs = millis(); return; }
 
   // Bridge sends {"time":[epoch_sec, tz_offset_sec]}; gmtime_r on the
@@ -267,7 +279,9 @@ inline void dataPoll(TamaState* out) {
     return;
   }
 
+  xferSetSource(true);                 // lines below come over USB-CDC
   _usbLine.feed(Serial, out);
+  xferSetSource(false);                // and these over BLE
   // BLE ring buffer is drained manually since it's not a Stream.
   while (bleAvailable()) {
     int c = bleRead();
