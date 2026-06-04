@@ -87,9 +87,9 @@ static void drawBlockCell(Surface& gfx, uint32_t cp, int x, int y,
 }
 
 void drawLine(Surface& gfx, const char* line, int x, int y,
-              int scale, uint16_t fg, uint16_t bg) {
-  const int cw = 6 * scale, ch = 8 * scale;
-  gfx.setTextSize(scale);
+              int sx, int sy, uint16_t fg, uint16_t bg) {
+  const int cw = 6 * sx, ch = 8 * sy;
+  gfx.setTextSize(sx, sy);
   gfx.setTextColor(fg, bg);
   for (const char* p = line; *p; ) {
     uint32_t cp = utf8Next(&p);
@@ -106,9 +106,9 @@ void drawLine(Surface& gfx, const char* line, int x, int y,
 }
 
 void drawLineCentered(Surface& gfx, const char* line, int cx, int y,
-                      int scale, uint16_t fg, uint16_t bg) {
-  int w = cellLen(line) * 6 * scale;
-  drawLine(gfx, line, cx - w / 2, y, scale, fg, bg);
+                      int sx, int sy, uint16_t fg, uint16_t bg) {
+  int w = cellLen(line) * 6 * sx;
+  drawLine(gfx, line, cx - w / 2, y, sx, sy, fg, bg);
 }
 
 }  // namespace blockart

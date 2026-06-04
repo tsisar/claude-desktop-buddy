@@ -82,6 +82,13 @@ const uint16_t BUDDY_BG=0x0000, BUDDY_HEART=0xF810, BUDDY_DIM=0x8410,
   BUDDY_YEL=0xFFE0, BUDDY_WHITE=0xFFFF, BUDDY_CYAN=0x07FF, BUDDY_GREEN=0x07E0,
   BUDDY_PURPLE=0xA01F, BUDDY_RED=0xF800, BUDDY_BLUE=0x041F;
 static const uint8_t SCALE = 4;
+// Horizontal text scale, deliberately smaller than the vertical SCALE.
+// The species art was authored against terminal proportions (cells ~1:2,
+// tall and narrow); the classic 6×8 GFX cell scaled uniformly is 1:1.33
+// and reads visibly too WIDE. 3:4 gives an 18×32 cell (1:1.78) — close
+// to terminal aspect without touching any vertical layout constants, so
+// the per-species yOffset/overlay magic numbers all stay valid.
+static const uint8_t SCALE_X = 3;
 
 // ── hang breadcrumb (diagnostic) ───────────────────────────────────────────
 // RTC_NOINIT survives a warm reset but is wiped by a real power-cut. The
@@ -117,13 +124,13 @@ static char lastHang[40] = "";
 static const int BUDDY_Y_SHIFT = 32;
 
 void buddyPrintLine(const char* line, int yPx, uint16_t color, int xOff) {
-  int w = strlen(line) * BUDDY_CHAR_W * SCALE;
+  int w = strlen(line) * BUDDY_CHAR_W * SCALE_X;
   gfx.setTextColor(color, BUDDY_BG);
-  gfx.setCursor(BUDDY_X_CENTER - w/2 + xOff*SCALE, yPx + BUDDY_Y_SHIFT);
+  gfx.setCursor(BUDDY_X_CENTER - w/2 + xOff*SCALE_X, yPx + BUDDY_Y_SHIFT);
   gfx.print(line);
 }
 void buddyPrintSprite(const char* const* lines, uint8_t n, int yOffset, uint16_t color, int xOff) {
-  gfx.setTextSize(SCALE);
+  gfx.setTextSize(SCALE_X, SCALE);
   int yBase = BUDDY_Y_BASE * SCALE - (SCALE - 1) * 14;
   for (uint8_t i = 0; i < n; i++)
     buddyPrintLine(lines[i], yBase + (yOffset + i*BUDDY_CHAR_H)*SCALE, color, xOff);
@@ -132,13 +139,13 @@ void buddyPrintBlocks(const char* const* lines, uint8_t n, int yOffset, uint16_t
   int yBase = BUDDY_Y_BASE * SCALE - (SCALE - 1) * 14;
   for (uint8_t i = 0; i < n; i++)
     blockart::drawLineCentered(gfx, lines[i],
-                               BUDDY_X_CENTER + xOff * SCALE,
+                               BUDDY_X_CENTER + xOff * SCALE_X,
                                yBase + (yOffset + i*BUDDY_CHAR_H)*SCALE + BUDDY_Y_SHIFT,
-                               SCALE, color, BUDDY_BG);
+                               SCALE_X, SCALE, color, BUDDY_BG);
 }
-void buddySetCursor(int x, int y) { gfx.setCursor(BUDDY_X_CENTER + (x-BUDDY_X_CENTER)*SCALE, y*SCALE + BUDDY_Y_SHIFT); }
+void buddySetCursor(int x, int y) { gfx.setCursor(BUDDY_X_CENTER + (x-BUDDY_X_CENTER)*SCALE_X, y*SCALE + BUDDY_Y_SHIFT); }
 void buddySetColor(uint16_t fg) { gfx.setTextColor(fg, BUDDY_BG); }
-void buddyPrint(const char* s) { gfx.setTextSize(SCALE); gfx.print(s); }
+void buddyPrint(const char* s) { gfx.setTextSize(SCALE_X, SCALE); gfx.print(s); }
 
 // Species registry + buddyTick live in src/buddy.cpp now (Stage 4).
 // Stage3j just drives the state machine and calls buddyTick(activeState).
