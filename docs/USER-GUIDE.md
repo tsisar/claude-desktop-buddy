@@ -149,6 +149,29 @@ Claude desktop:
    directory with `manifest.json` (palette + state mapping) and a few
    96px-wide GIFs (`sleep.gif`, `idle.gif`, …, `heart.gif`). See
    `characters/bufo/` in this repo for a working example.
+
+   State entries can also point at pixel-art **SVG** files — much
+   smaller than GIFs and scaled crisply to the panel. The simple form
+   lists one file per frame, stepped at a fixed interval and looped:
+
+   ```json
+   "idle": ["idle_0.svg", "idle_1.svg", "idle_2.svg"]
+   ```
+
+   Each file is one fully-composed frame (paths are unions of
+   axis-aligned rects; `fill-opacity="0"` leftovers are skipped).
+   `"svgDelay"` sets ms per frame (default 200). Note this differs
+   from GIF arrays, which are rotating *variants*, not frames.
+
+   A single-file form also exists (`"sleep": "sleep.svg"`): top-level
+   `<g>` groups are layers, nested `<g>` groups are that layer's
+   frames, and all layers spread their frames across one shared
+   `"svgDuration"` ms cycle. Layer timing is ambiguous by nature —
+   prefer the per-frame form.
+
+   `"svgWidth"`/`"svgHeight"` cap the rendered size in panel px
+   (aspect preserved). GIF and SVG states can mix in one pack; see
+   `characters/claude-svg/` for a working example.
 4. While the upload runs the device shows an `installing N/M KB`
    progress bar with `don't unplug` underneath. ~3 KB/s over BLE.
 5. When the bar finishes, the buddy switches to the GIF character.

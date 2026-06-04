@@ -55,6 +55,7 @@ bool buddyMode    = true;    // ASCII species mode is the boot default
 bool gifAvailable = false;   // flipped to true when characterInit succeeds
 
 #include "character.h"      // characterInit/Close/Tick/SetState/Loaded
+#include "svg_anim.h"       // svgAnimLoaded() — faster render cadence for SVG
 #include "clock.h"          // clockDrawWidget/clockDrawFace — clock UI
 #include "xfer.h"           // xferCommand() — calls characterInit on char_end
 
@@ -1815,7 +1816,26 @@ void loop() {
 
   // ── render ──
   if (!dispOk || now < nextDraw) { delay(8); return; }
-  nextDraw = now + 200;
+  // SVG characters are time-indexed: every layer maps the shared cycle
+  // onto its own frame count, so frame holds aren't multiples of any one
+  // fixed cadence and polling aliases against them — layers visibly step
+  // at uneven moments relative to each other. Instead of a grid, render
+  // event-driven: svgAnimNextEventMs() says exactly when the next layer
+  // flips a frame, so every switch lands on time (within the loop's ~8 ms
+  // sleep) for ANY svgDuration, and we redraw only when something changes.
+  // Capped at 200 ms so the HUD/battery and menu latency keep the stock
+  // pace between distant frame events.
+  if (svgAnimLoaded()) {
+    uint32_t e = svgAnimNextEventMs();
+    // Floor of 40 ms: when two layers' switches land almost together
+    // (deltas as low as 18 ms exist in the claude-svg schedule), draw
+    // them in one pass instead of back-to-back full-canvas QSPI pushes —
+    // invisible to the eye, kinder to the shared display/touch 3.3V rail.
+    if (e < 40)  e = 40;
+    nextDraw = now + (e < 200 ? e : 200);
+  } else {
+    nextDraw = now + 200;
+  }
   bc(LS_RENDER);
 
   // Clock face takes over the home view when the device is parked: RTC

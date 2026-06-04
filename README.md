@@ -88,6 +88,13 @@ approval prompt is up). Any button press wakes it.
    ▘▘ ▝▝
 ```
 
+## ASCII pets
+```
+  ▐▛███▜▌
+ ▝▜█████▛▘
+   ▘▘ ▝▝
+```
+
 Eighteen pets, each with seven animations (sleep, idle, busy, attention,
 celebrate, dizzy, heart). Menu → "next pet" cycles them with a counter.
 Choice persists to NVS.

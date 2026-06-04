@@ -1,0 +1,21 @@
+{
+  "name": "claude-svg",
+  "colors": {
+    "body": "#D87656",
+    "bg": "#000000",
+    "text": "#FFFFFF",
+    "textDim": "#808080",
+    "ink": "#000000"
+  },
+  "svgDelay": 400,
+  "svgWidth": 160,
+  "states": {
+    "sleep": ["sleeping-soundly.svg"],
+    "idle": ["programming-scene.svg"],
+    "busy": ["angry-at-laptop.svg"],
+    "attention": ["it-depends-sign.svg"],
+    "celebrate": ["happy-pixel-celebrating.svg"],
+    "dizzy": ["dizzy-failed-state.svg"],
+    "heart": ["love-cloud-pixel.svg"]
+  }
+}

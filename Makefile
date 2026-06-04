@@ -31,7 +31,10 @@ LOG  ?= $(HOME)/buddy-serial.log
 
 .DEFAULT_GOAL := build
 
-.PHONY: build flash upload monitor flash-monitor log clean fs-flash erase ports help
+.PHONY: build flash upload monitor flash-monitor log clean fs-flash erase ports help char-usb
+
+# Default pack for `make char-usb`; override: make char-usb CHAR=characters/bufo
+CHAR ?= characters/claude-svg
 
 ## build: compile the firmware for $(ENV)
 build:
@@ -54,6 +57,10 @@ flash-monitor: flash monitor
 ## log: monitor AND mirror the serial stream to $(LOG) for later grepping
 log:
 	$(PIO) device monitor -p $(PORT) -b $(BAUD) | tee $(LOG)
+
+## char-usb: push a character pack over USB-CDC (no BLE needed): make char-usb [CHAR=characters/...]
+char-usb:
+	tools/usb_xfer_send.sh $(CHAR) --port $(PORT)
 
 ## fs-flash: build + upload the LittleFS image (GIF character packs in data/)
 fs-flash:

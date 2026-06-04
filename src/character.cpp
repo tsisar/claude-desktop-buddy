@@ -13,8 +13,21 @@
 //
 // Text mode (manifest "mode":"text" with frame strings instead of GIFs)
 // stays supported — same code path as M5, just rendered through Surface.
+//
+// SVG mode: a state entry ending in ".svg" is played through svg_anim
+// (pixel-art SVG made of axis-aligned rects) instead of AnimatedGIF.
+// Detection is per state, so a pack can mix GIF and SVG states freely.
+//   "idle": ["idle_0.svg", "idle_1.svg", ...]
+// One file per frame, stepped at a fixed interval and looped — however
+// many files are listed is how many frames play (a single file is a
+// static image). NOTE this differs from GIF arrays, which are rotating
+// variants, not frames. Optional top-level manifest keys:
+//   "svgDelay" — ms each frame is shown (default 200)
+//   "svgWidth"/"svgHeight" — max rendered size in panel px (aspect is
+//                   always kept; omitted = fill the upper home area)
 
 #include "character.h"
+#include "svg_anim.h"
 #include "hal/display.h"
 #include "hal/storage.h"
 #include "debug.h"
@@ -51,8 +64,12 @@ static uint32_t  textNext  = 0;
 static bool    loaded = false;
 static Palette pal = { 0xC2A6, 0x0000, 0xFFFF, 0x8410, 0x0000 };
 static char    basePath[48];
-static const uint8_t MAX_GIFS = 32;
-static char    gifPaths[MAX_GIFS][32];
+// 64 entries × 48 chars: SVG frame sequences list one file per FRAME (a
+// 10-frame attention alone is 10 entries) and artboard exports have long
+// descriptive names ("developer-pair-programming-scene.svg" is 37 chars —
+// the old 32-char cells truncated it into a file that never opens).
+static const uint8_t MAX_GIFS = 64;
+static char    gifPaths[MAX_GIFS][48];
 static uint8_t stateStart[N_STATES];
 static uint8_t stateCount[N_STATES];
 static uint8_t stateRot[N_STATES];
@@ -68,6 +85,14 @@ static uint32_t    variantStartedMs = 0;
 static const uint32_t VARIANT_DWELL_MS = 5000;
 static const uint32_t ANIM_PAUSE_MS    = 800;
 static bool        gifOpen = false;
+static bool        svgMode = false;     // current state plays through svg_anim
+static int16_t     svgW = 0, svgH = 0;  // manifest size cap, 0 = unset
+static uint16_t    svgDelay = 200;      // ms per frame for svg sequences
+
+static bool isSvgFile(const char* p) {
+  const char* e = strrchr(p, '.');
+  return e && strcasecmp(e, ".svg") == 0;
+}
 
 static uint16_t parseHexColor(const char* s, uint16_t fallback) {
   if (!s) return fallback;
@@ -229,19 +254,22 @@ bool characterInit(const char* name) {
         if (gifTotal >= MAX_GIFS) break;
         const char* fn = e.as<const char*>();
         if (fn) {
-          snprintf(gifPaths[gifTotal], 32, "%s", fn);
+          snprintf(gifPaths[gifTotal], sizeof(gifPaths[0]), "%s", fn);
           gifTotal++; stateCount[i]++;
         }
       }
     } else {
       const char* fn = v.as<const char*>();
       if (fn) {
-        snprintf(gifPaths[gifTotal], 32, "%s", fn);
+        snprintf(gifPaths[gifTotal], sizeof(gifPaths[0]), "%s", fn);
         gifTotal++; stateCount[i] = 1;
       }
     }
   }
 
+  svgDelay = doc["svgDelay"] | 200;
+  svgW = doc["svgWidth"]  | 0;
+  svgH = doc["svgHeight"] | 0;
   gif.begin(LITTLE_ENDIAN_PIXELS);
   loaded = true;
   Serial.printf("[char] loaded '%s' from %s (%u gifs)\n",
@@ -260,6 +288,7 @@ void characterSetPeek(bool) {}
 
 void characterClose() {
   if (gifOpen) { gif.close(); gifOpen = false; }
+  if (svgMode) { svgAnimClose(); svgMode = false; }
   loaded = false;
   textMode = false;
   curState = 0xFF;
@@ -274,6 +303,7 @@ void characterInvalidate() {
     return;
   }
   if (gifOpen) { gif.close(); gifOpen = false; }
+  if (svgMode) { svgAnimClose(); svgMode = false; }
   animPauseUntil = 0;
   uint8_t s = curState; curState = 0xFF;
   characterSetState(s);
@@ -290,6 +320,7 @@ void characterSetState(uint8_t s) {
   }
 
   if (gifOpen) { gif.close(); gifOpen = false; }
+  if (svgMode) { svgAnimClose(); svgMode = false; }
   animPauseUntil = 0;
   curState = s;
 
@@ -299,8 +330,34 @@ void characterSetState(uint8_t s) {
   }
 
   uint8_t idx = stateStart[s] + stateRot[s];
-  char full[80];
+  char full[96];
   snprintf(full, sizeof(full), "%s/%s", basePath, gifPaths[idx]);
+  if (isSvgFile(gifPaths[stateStart[s]])) {
+    // Every entry of the state is one FRAME, stepped at svgDelay. One
+    // entry = a static image; the array length sets the frame count.
+    svgAnimSeqBegin();
+    bool ok = true;
+    for (uint8_t i = 0; i < stateCount[s] && ok; i++) {
+      snprintf(full, sizeof(full), "%s/%s",
+               basePath, gifPaths[stateStart[s] + i]);
+      ok = svgAnimSeqAddFrame(full);
+    }
+    ok = ok && svgAnimSeqEnd(svgDelay);
+    if (!ok) svgAnimClose();
+    if (ok) {
+      svgMode = true;
+      // Same slot the GIF gets: centered in the upper home area, above
+      // the HUD, with a small margin all round. A manifest svgWidth/
+      // svgHeight shrinks the fit box (clamped to the area); aspect is
+      // preserved either way, so one dimension acts as a max.
+      int ax = 4, ay = 4;
+      int aw = gfx.width() - 8, ah = homeUpperBottom() - 8;
+      int bw = (svgW > 0 && svgW < aw) ? svgW : aw;
+      int bh = (svgH > 0 && svgH < ah) ? svgH : ah;
+      svgAnimPlace(ax + (aw - bw) / 2, ay + (ah - bh) / 2, bw, bh);
+    }
+    return;
+  }
   if (gif.open(full, gifOpenCb, gifCloseCb, gifReadCb, gifSeekCb, gifDrawCb)) {
     gifOpen = true;
     gifW = gif.getCanvasWidth();
@@ -341,6 +398,13 @@ void characterTick() {
   }
 
   uint32_t now = millis();
+
+  if (svgMode) {
+    // An SVG array is FRAMES of one looping animation (not variants like
+    // GIF arrays), so there's no dwell rotation — just draw.
+    svgAnimTick(pal.bg);
+    return;
+  }
 
   if (!gifOpen) {
     // Between gifs in a rotation: hold the last frame, reopen on dwell end.
