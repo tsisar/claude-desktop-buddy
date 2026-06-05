@@ -83,12 +83,6 @@ approval prompt is up). Any button press wakes it.
 
 ## ASCII pets
 
-```
-  ▐▛███▜▌
- ▝▜█████▛▘
-   ▘▘ ▝▝
-```
-
 Eighteen pets, each with seven animations (sleep, idle, busy, attention,
 celebrate, dizzy, heart). Menu → "next pet" cycles them with a counter.
 Choice persists to NVS.
@@ -119,8 +113,8 @@ Quick recipes — think of each cell as four quadrants; the *missing*
 quadrant of `▛▜▙▟` (BR, BL, TR, TL respectively) is what rounds a corner:
 
 ```
-rounded shoulders:   ▐▛████▜▌
-rounded base:        ▝▜████▛▘
+rounded shoulders:    ▐▛███▜▌
+rounded base:        ▝▜█████▛▘
 feet / toes:           ▘▘ ▝▝      single quadrants read as tiny feet
 flame tip:              ▗▟▖       quadrant + three-quadrant stack
 half-step outline:   ▗▄▄▄▄▄▄▖     eighths make soft slopes
