@@ -65,21 +65,53 @@ void batteryConfigCharger() {
   axp().enableButtonBatteryCharge();
 }
 
+// Cached telemetry. These getters feed drawBatteryWidget() on every render
+// pass (up to ~25 Hz) plus the screensaver / clock-face gating, and every
+// XPowersLib getter underneath is a blocking I2C transaction. Refresh the
+// charging / VBUS pair every 500 ms (fast enough that plugging a cable in
+// feels instant) and the fuel gauge every 2 s — percent and voltage move
+// on the scale of minutes. Unsigned millis() arithmetic survives rollover.
+static constexpr uint32_t CHG_POLL_MS   = 500;
+static constexpr uint32_t GAUGE_POLL_MS = 2000;
+
+static uint32_t gaugeMs = 0; static bool gaugeRead = false;
+static int  cachedMv  = 0;   static int  cachedPct = 0;
+static uint32_t chgMs = 0;   static bool chgRead   = false;
+static bool cachedVbus = false, cachedChg = false;
+
+static void refreshGauge() {
+  uint32_t now = millis();
+  if (gaugeRead && now - gaugeMs < GAUGE_POLL_MS) return;
+  gaugeRead = true; gaugeMs = now;
+  cachedMv = (int)axp().getBattVoltage();    // mV
+  int pct = axp().getBatteryPercent();       // -1 if not yet known
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+  cachedPct = pct;
+}
+
+static void refreshChg() {
+  uint32_t now = millis();
+  if (chgRead && now - chgMs < CHG_POLL_MS) return;
+  chgRead = true; chgMs = now;
+  cachedVbus = axp().isVbusIn();
+  cachedChg  = axp().isCharging();
+}
+
 int batteryMilliVolts() {
   if (!powerOk()) return 0;
-  return (int)axp().getBattVoltage();        // mV
+  refreshGauge();
+  return cachedMv;
 }
 
 int batteryPercent() {
   if (!powerOk()) return 0;
-  int pct = axp().getBatteryPercent();       // -1 if not yet known
-  if (pct < 0) pct = 0;
-  if (pct > 100) pct = 100;
-  return pct;
+  refreshGauge();
+  return cachedPct;
 }
 
-bool onUsb()    { return powerOk() && axp().isVbusIn(); }
-bool charging() { return powerOk() && axp().isCharging(); }
+bool onUsb()    { if (!powerOk()) return false; refreshChg(); return cachedVbus; }
+bool charging() { if (!powerOk()) return false; refreshChg(); return cachedChg;  }
 
 bool batteryBackupChargeEnabled() {
   // NB: there is no ADC for the VBACKUP cell — XPowersLib's

@@ -608,7 +608,8 @@ static void drawApproval() {
 // main content. PET / INFO have a page counter there, so they skip it.
 //
 // Colour signals: yellow = actively charging, green = healthy, orange =
-// low, red = critical.
+// low, red = critical. A lightning bolt overlays the body whenever USB
+// power is present (even at 100%, when the charger state machine idles).
 void drawBatteryWidget(int bx, int by) {
   if (!settings().battery) return;   // "battery" setting hides the widget
   int pct = batteryPercent();
@@ -629,6 +630,17 @@ void drawBatteryWidget(int bx, int by) {
                 : pct >= 30 ? 0xFD20   // orange
                             : 0xF800;  // red
     gfx.fillRect(innerX, innerY + innerH - fillH, innerW, fillH, fc);
+  }
+
+  if (onUsb()) {
+    // Zigzag bolt centred on the body: a black pass one pixel fatter acts
+    // as an outline so the white bolt reads on both the fill and the empty
+    // (black) part of the icon.
+    int cx = bx + bw / 2, cy = by + tipH + bh / 2;
+    gfx.fillTriangle(cx + 4, cy - 9, cx - 4, cy + 2, cx + 2, cy + 2, 0x0000);
+    gfx.fillTriangle(cx - 4, cy + 9, cx + 4, cy - 2, cx - 2, cy - 2, 0x0000);
+    gfx.fillTriangle(cx + 3, cy - 8, cx - 3, cy + 1, cx + 1, cy + 1, 0xFFFF);
+    gfx.fillTriangle(cx - 3, cy + 8, cx + 3, cy - 1, cx - 1, cy - 1, 0xFFFF);
   }
 
   gfx.setTextSize(2);
