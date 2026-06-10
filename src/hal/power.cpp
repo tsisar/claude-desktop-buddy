@@ -98,17 +98,3 @@ PwronEvent powerPollButton() {
   pmu.clearIrqStatus();
   return ev;
 }
-
-void powerDumpRails() {
-  if (!ok) { Serial.println("[pmu] (not initialised)"); return; }
-  auto d = [](const char* n, uint16_t mv, bool en) {
-    Serial.printf("[pmu]   %-6s %4umV %s\n", n, mv, en ? "ON" : "off");
-  };
-  d("DC1",   pmu.getDC1Voltage(),   pmu.isEnableDC1());
-  d("ALDO1", pmu.getALDO1Voltage(), pmu.isEnableALDO1());
-  d("ALDO2", pmu.getALDO2Voltage(), pmu.isEnableALDO2());
-  d("ALDO3", pmu.getALDO3Voltage(), pmu.isEnableALDO3());
-  d("ALDO4", pmu.getALDO4Voltage(), pmu.isEnableALDO4());
-  d("BLDO1", pmu.getBLDO1Voltage(), pmu.isEnableBLDO1());
-  d("BLDO2", pmu.getBLDO2Voltage(), pmu.isEnableBLDO2());
-}

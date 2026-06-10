@@ -45,6 +45,3 @@ void powerFeedWatchdog();
 // AXP2101 power-on defaults (see docs/device-power-map.md), and ALDO1 is the
 // ES8311 codec rail — cutting it kills audio. Blank the screen with
 // Surface::setBrightness(0) (the `screenOn` path in main.cpp), not a rail gate.
-
-// Dump every rail (voltage + on/off) to Serial — bring-up diagnostic.
-void powerDumpRails();

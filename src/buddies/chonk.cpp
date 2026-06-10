@@ -12,7 +12,6 @@ static void doSleep(uint32_t t) {
   static const char* const EXHALE[5]  = { "            ", "  /\\____/\\  ", " ( -    - ) ", "(    --    )", "(__________)" };
   static const char* const SNORE[5]   = { "            ", "  /\\____/\\  ", " ( -    - ) ", "(    OO    )", "(__________)" };
   static const char* const JIGGLE[5]  = { "            ", "  /\\____/\\  ", " ( -    - ) ", "(   ~~~~   )", " ~~~~~~~~~~ " };
-  static const char* const DROOL[5]   = { "            ", "  /\\____/\\  ", " ( -    u ) ", " (   __   ) ", " (___..___) " };
 
   const char* const* P[6] = { CURL, INHALE, EXHALE, SNORE, INHALE, JIGGLE };
   static const uint8_t SEQ[] = {

@@ -31,7 +31,6 @@ struct TamaState {
   bool     connected;
   char     lines[TAMA_MAX_LINES][92];
   uint8_t  nLines;
-  uint16_t lineGen;          // bumps when lines change — lets UI reset scroll
   char     promptId[40];     // pending permission request ID; empty = no prompt
   char     promptTool[20];
   char     promptHint[44];
@@ -229,9 +228,6 @@ static void _applyJson(const char* line, TamaState* out) {
       const char* s = v.as<const char*>();
       _asciiCopy(out->lines[n], sizeof(out->lines[n]), s ? s : "");
       n++;
-    }
-    if (n != out->nLines || (n > 0 && strcmp(out->lines[n-1], out->msg) != 0)) {
-      out->lineGen++;
     }
     out->nLines = n;
   }

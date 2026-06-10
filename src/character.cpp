@@ -1,18 +1,11 @@
-// AMOLED port of character.cpp — reads a GIF character pack from storage
-// (storageFS(), so SD or LittleFS as picked by hal/storage.h), parses the
-// manifest, opens one GIF per persona state, and draws it to the global
-// Surface (gfx) using AnimatedGIF.
-//
-// Differences from the M5 version:
-//   • No peek mode — the AMOLED PET/INFO views replace the home buddy
-//     entirely, so the GIF doesn't have to shrink to share the screen.
-//   • No characterRenderTo(TFT_eSPI*) — landscape clock isn't ported.
-//   • LittleFS replaced by storageFS().
-//   • Surface (Arduino_GFX-backed) replaces TFT_eSprite. Per-pixel writes
-//     in the GIF draw callback go through Surface::drawPixel().
+// Reads a GIF character pack from storage (storageFS(), so SD or LittleFS
+// as picked by hal/storage.h), parses the manifest, opens one GIF per
+// persona state, and draws it to the global Surface (gfx) using
+// AnimatedGIF. Per-pixel writes in the GIF draw callback go through
+// Surface::drawPixel().
 //
 // Text mode (manifest "mode":"text" with frame strings instead of GIFs)
-// stays supported — same code path as M5, just rendered through Surface.
+// stays supported — same code path, rendered through Surface.
 //
 // SVG mode: a state entry ending in ".svg" is played through svg_anim
 // (pixel-art SVG made of axis-aligned rects) instead of AnimatedGIF.
@@ -278,13 +271,6 @@ bool characterInit(const char* name) {
 }
 
 bool characterLoaded()          { return loaded; }
-const Palette& characterPalette() { return pal; }
-
-// AMOLED port doesn't carry the landscape clock face — stub kept so the
-// buddy.h API surface stays uniform across builds.
-class TFT_eSPI;
-void characterRenderTo(TFT_eSPI*, int, int) {}
-void characterSetPeek(bool) {}
 
 void characterClose() {
   if (gifOpen) { gif.close(); gifOpen = false; }
@@ -294,20 +280,6 @@ void characterClose() {
   curState = 0xFF;
 }
 
-void characterInvalidate() {
-  if (!loaded) return;
-  if (textMode) {
-    gfx.fillSprite(pal.bg);
-    uint8_t s = curState; curState = 0xFF;
-    characterSetState(s);
-    return;
-  }
-  if (gifOpen) { gif.close(); gifOpen = false; }
-  if (svgMode) { svgAnimClose(); svgMode = false; }
-  animPauseUntil = 0;
-  uint8_t s = curState; curState = 0xFF;
-  characterSetState(s);
-}
 
 void characterSetState(uint8_t s) {
   if (!loaded || s >= N_STATES || s == curState) return;

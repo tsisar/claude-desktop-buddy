@@ -183,28 +183,19 @@ inline uint8_t statsFedProgress() {
 
 struct Settings {
   bool sound;
-  bool bt;
-  bool wifi;     // placeholder — no WiFi stack linked yet, just stores the pref
-  bool led;
   bool hud;
-  uint8_t clockRot;  // 0=auto 1=portrait 2=landscape
   bool battery;      // show the battery widget on home / clock
   bool screensaver;  // show the full-screen clock face when idle on USB;
                      // off ⇒ behave as if the RTC were never set (no face,
                      // battery still just sleeps)
 };
 
-static Settings _settings = { true, true, false, true, true, 0, true, true };
+static Settings _settings = { true, true, true, true };
 
 inline void settingsLoad() {
   _prefs.begin("buddy", true);
   _settings.sound = _prefs.getBool("s_snd", true);
-  _settings.bt    = _prefs.getBool("s_bt",  true);
-  _settings.wifi  = _prefs.getBool("s_wifi",false);
-  _settings.led   = _prefs.getBool("s_led", true);
   _settings.hud      = _prefs.getBool("s_hud", true);
-  _settings.clockRot = _prefs.getUChar("s_crot", 0);
-  if (_settings.clockRot > 2) _settings.clockRot = 0;
   _settings.battery = _prefs.getBool("s_bat", true);
   _settings.screensaver = _prefs.getBool("s_scrn", true);
   _prefs.end();
@@ -213,11 +204,7 @@ inline void settingsLoad() {
 inline void settingsSave() {
   _prefs.begin("buddy", false);
   _prefs.putBool("s_snd", _settings.sound);
-  _prefs.putBool("s_bt",  _settings.bt);
-  _prefs.putBool("s_wifi",_settings.wifi);
-  _prefs.putBool("s_led", _settings.led);
   _prefs.putBool("s_hud", _settings.hud);
-  _prefs.putUChar("s_crot", _settings.clockRot);
   _prefs.putBool("s_bat", _settings.battery);
   _prefs.putBool("s_scrn", _settings.screensaver);
   _prefs.end();

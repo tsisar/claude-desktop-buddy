@@ -32,7 +32,7 @@
 // --- BOOT button (kept as an emergency wake/back key; no A/B buttons) ---
 #define BOOT_BTN    0
 
-// --- ES8311 audio codec + speaker (optional; not used by the buddy yet) ---
+// --- ES8311 audio codec + speaker (hal/audio.cpp — beeps/UI feedback) ---
 #define I2S_MCK_IO  16
 #define I2S_BCK_IO  9
 #define I2S_WS_IO   45
@@ -40,7 +40,7 @@
 #define I2S_DI_IO   10
 #define AUDIO_PA_EN 46
 
-// --- microSD (1-bit SDMMC; unused by the buddy, here for completeness) ---
+// --- microSD (1-bit SDMMC; hal/storage.cpp mounts it, screenshots/packs) ---
 #define SDMMC_CLK   2
 #define SDMMC_CMD   1
 #define SDMMC_DATA  3

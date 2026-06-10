@@ -12,7 +12,6 @@ static void doSleep(uint32_t t) {
   static const char* const CURL[5]     = { "            ", "            ", "   .-/\\.    ", "  (  ..  )) ", "  `~~~~~~`  " };
   static const char* const CURL_TW[5]  = { "            ", "            ", "   .-/\\.    ", "  (  ..  )) ", "  `~~~~~~`~ " };
   static const char* const PURR[5]     = { "            ", "            ", "   .-..-.   ", "  ( u.u )   ", " `~------'~ " };
-  static const char* const DREAM[5]    = { "            ", "            ", "   .-..-.   ", "  ( o.o )   ", "  `------`  " };
 
   const char* const* P[6] = { LOAF, BREATHE, LOAF, PURR, CURL, CURL_TW };
   static const uint8_t SEQ[] = {
