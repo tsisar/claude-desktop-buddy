@@ -41,7 +41,7 @@ static es8311_handle_t   es = nullptr;
 static bool              ok = false;
 
 // ── async playback queue ──────────────────────────────────────────────────
-enum AudioKind : uint8_t { AK_BEEP = 0, AK_CLICK = 1 };
+enum AudioKind : uint8_t { AK_BEEP = 0, AK_CLICK = 1, AK_CLICK_SOFT = 2 };
 struct AudioReq { uint8_t kind; uint16_t freq; uint16_t ms; };
 static QueueHandle_t s_q = nullptr;
 
@@ -146,14 +146,21 @@ static void synthBeep(uint16_t freq, uint16_t ms) {
 
 // Short percussive "click" (key-press feel): fast exp decay + noisy attack,
 // body pitch = freq so approve/deny/menu stay distinct.
-static void synthClick(uint16_t freq) {
+static void synthClick(uint16_t freq, bool soft) {
   if (freq == 0) freq = 2000;
   const int rate = AUDIO_RATE;
-  const int ms = 25;                                   // tick (boosted for test)
+  const int ms = soft ? 32 : 25;                       // soft = a touch longer
   const int samples = rate * ms / 1000;
   if (samples <= 0) return;
   int period = rate / freq; if (period < 2) period = 2;
-  const int noiseSamples = rate * 3 / 1000;            // ~3ms attack noise
+  // Sharp click: a noisy attack burst + hard onset gives the percussive bite.
+  // Soft click: no noise, the onset is ramped over a few ms and the decay is
+  // gentler, so swipes get a rounded tick instead of a snap.
+  const int   noiseSamples  = soft ? 0 : rate * 3 / 1000;   // ~3ms attack noise
+  const int   attackSamples = soft ? rate * 3 / 1000 : 0;   // ~3ms onset fade-in
+  const float noiseAmt      = soft ? 0.0f : 0.6f;
+  const float decay         = soft ? 2.6f : 3.5f;
+  const float amp           = soft ? 11000.0f : 16000.0f;
   uint32_t rng = 0x9E3779B9u ^ ((uint32_t)freq * 2654435761u);
 
   static int16_t buf[256];
@@ -162,15 +169,20 @@ static void synthClick(uint16_t freq) {
     int frames = 0;
     for (; frames < 128 && done < samples; frames++, done++) {
       float t   = (float)done / samples;               // 0..1
-      float env = expf(-3.5f * t);                      // percussive decay
-      float tone = ((done % period) < period / 2) ? 1.0f : -1.0f;
+      float env = expf(-decay * t);                     // percussive decay
+      if (attackSamples && done < attackSamples)
+        env *= (float)done / attackSamples;             // round off the onset
+      // Soft tick uses a pure sine (no harmonics → no "beep" edge); the
+      // sharp click keeps the square wave, whose bite suits a snap.
+      float tone = soft ? sinf(6.2831853f * freq * (float)done / rate)
+                        : (((done % period) < period / 2) ? 1.0f : -1.0f);
       float n = 0.0f;
       if (done < noiseSamples) {                        // click attack
         rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
         n = ((int)(rng & 0xFFFF) - 32768) / 32768.0f;
       }
-      float s = (tone * 0.7f + n * 0.6f) * env;
-      int16_t v = (int16_t)(s * 16000.0f);             // boosted for test
+      float s = (tone * 0.7f + n * noiseAmt) * env;
+      int16_t v = (int16_t)(s * amp);
       buf[frames * 2]     = v;
       buf[frames * 2 + 1] = v;
     }
@@ -181,8 +193,9 @@ static void synthClick(uint16_t freq) {
 static void audioTask(void*) {
   AudioReq r;
   while (xQueueReceive(s_q, &r, portMAX_DELAY) == pdTRUE) {
-    if (r.kind == AK_CLICK) synthClick(r.freq);
-    else                    synthBeep(r.freq, r.ms);
+    if      (r.kind == AK_CLICK)      synthClick(r.freq, false);
+    else if (r.kind == AK_CLICK_SOFT) synthClick(r.freq, true);
+    else                              synthBeep(r.freq, r.ms);
   }
 }
 
@@ -225,5 +238,11 @@ void audioBeep(uint16_t freq, uint16_t ms) {
 void audioClick(uint16_t freq) {
   if (!ok || !s_q) return;
   AudioReq r{ AK_CLICK, freq, 0 };
+  xQueueSend(s_q, &r, 0);          // non-blocking; drop if the queue is full
+}
+
+void audioClickSoft(uint16_t freq) {
+  if (!ok || !s_q) return;
+  AudioReq r{ AK_CLICK_SOFT, freq, 0 };
   xQueueSend(s_q, &r, 0);          // non-blocking; drop if the queue is full
 }

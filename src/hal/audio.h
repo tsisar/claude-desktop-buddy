@@ -27,5 +27,9 @@ void audioBeep(uint16_t freq, uint16_t ms);
 // UI feedback sound. Non-blocking; no-op if audioInit() failed.
 void audioClick(uint16_t freq);
 
+// Softer sibling of audioClick: no noise burst, a ramped onset and gentler
+// decay — a rounded tick for swipe navigation. Same pitch parameter.
+void audioClickSoft(uint16_t freq);
+
 // 0..100 output volume (passed to the codec). Call after audioInit().
 void audioSetVolume(uint8_t pct);

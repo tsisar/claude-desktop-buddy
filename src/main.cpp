@@ -296,6 +296,19 @@ static void beep(uint16_t freq, uint16_t ms) {
   audioBeep(freq, ms);
 }
 
+// Short percussive tick (noisy attack + fast decay) — distinct from a tone
+// beep. Used as the screenshot "shutter" sound. Gated by the same setting.
+static void click(uint16_t freq) {
+  if (!settings().sound) return;
+  audioClick(freq);
+}
+
+// Softer tick (no noise, ramped onset) for swipe navigation.
+static void clickSoft(uint16_t freq) {
+  if (!settings().sound) return;
+  audioClickSoft(freq);
+}
+
 static void sendCmd(const char* json) {
   VLOGLN(json);
   size_t n = strlen(json);
@@ -1139,7 +1152,7 @@ static void applyMainMenu(int idx) {
       // so this deliberate reboot reports as a cold boot next time, not a false
       // "[hang] warm reset". Beep + a short blank so the press is acknowledged
       // before the chip resets.
-      beep(600, 120);
+      click(600);
       {
         // Report the loop stage we were in when reboot was pressed: if the UI
         // was sluggish-but-alive, this names what was eating the loop. Then
@@ -1431,7 +1444,7 @@ static void handleModalGesture(const GestureEvent& ev) {
   if (ev.kind == GESTURE_SWIPE_UP) {
     if (uiState == UI_CONFIRM) confirmAction = CONF_NONE;
     enterState(UI_NORMAL);
-    beep(600, 30);
+    click(600);
     return;
   }
   if (ev.kind == GESTURE_SWIPE_DOWN) { stepBack(); return; }
@@ -1440,8 +1453,8 @@ static void handleModalGesture(const GestureEvent& ev) {
 
   if (uiState == UI_CONFIRM) {
     int h = confirmHit(ev.x, ev.y);
-    if (h == 0 || h == -2) { doConfirm(0); beep(600, 30); }
-    else if (h == 1)       { doConfirm(1); beep(2400, 60); }
+    if (h == 0 || h == -2) { doConfirm(0); click(600); }
+    else if (h == 1)       { doConfirm(1); click(2400); }
     return;
   }
 
@@ -1450,12 +1463,12 @@ static void handleModalGesture(const GestureEvent& ev) {
     enterState(uiState == UI_MENU_MAIN     ? UI_NORMAL
               : uiState == UI_MENU_SETTINGS ? UI_MENU_MAIN
               :                               UI_MENU_SETTINGS);
-    beep(600, 30);
+    click(600);
     return;
   }
   if (idx < 0) return;
 
-  beep(2400, 30);
+  click(2400);
   switch (uiState) {
     case UI_MENU_MAIN:     applyMainMenu(idx); break;
     case UI_MENU_SETTINGS: applySettings(idx); break;
@@ -1513,13 +1526,13 @@ static void navDown() {
 }
 static void navActivate() {
   if (uiState == UI_CONFIRM) {
-    if (navIdx == 0) { doConfirm(0); beep(600, 30); }
-    else             { doConfirm(1); beep(2400, 60); }
+    if (navIdx == 0) { doConfirm(0); click(600); }
+    else             { doConfirm(1); click(2400); }
     return;
   }
   int n = currentMenuItems();
   if (n <= 0 || navIdx < 0 || navIdx >= n) return;
-  beep(2400, 30);
+  click(2400);
   switch (uiState) {
     case UI_MENU_MAIN:     applyMainMenu(navIdx); break;
     case UI_MENU_SETTINGS: applySettings(navIdx); break;
@@ -1538,7 +1551,7 @@ static void mockApprove() {
   responseSent = true;
   uint32_t tookS = (millis() - promptArrivedMs) / 1000;
   statsOnApproval(tookS);
-  beep(2400, 60);
+  click(2400);
   if (tookS < 5) triggerOneShot(P_HEART, 2000);
 }
 
@@ -1550,7 +1563,7 @@ static void mockDeny() {
   sendCmd(cmd);
   responseSent = true;
   statsOnDenial();
-  beep(600, 60);
+  click(600);
 }
 
 // ── setup / loop ───────────────────────────────────────────────────────────
@@ -1676,7 +1689,7 @@ void loop() {
     responseSent = false;
     if (tama.promptId[0]) {
       promptArrivedMs = now;
-      beep(1200, 80);
+      click(1200);
       wake();   // new prompt is itself an interaction event
       Serial.printf("[3i.5] PROMPT %s  tool=%s\n", tama.promptId, tama.promptTool);
     }
@@ -1763,7 +1776,7 @@ void loop() {
   uint32_t pk = blePasskey();
   if (pk && !lastPasskey) {
     wake();
-    beep(1800, 60);
+    click(1800);
     Serial.printf("[3i.5] passkey %06lu\n", (unsigned long)pk);
   }
   lastPasskey = pk;
@@ -1789,15 +1802,15 @@ void loop() {
   // BOOT hold = screenshot from ANY state — home, menus, modals. One
   // gesture, one meaning, so the buttons never need per-mode re-learning.
   if (be == BOOT_LONG) {
-    beep(1200, 30);
     bool ok = screenshotSave();
-    shotFlash(ok);                          // white blink = saved, red = failed
-    beep(ok ? 1800 : 400, ok ? 60 : 200);   // audible twin of the flash
+    shotFlash(ok);              // white blink = saved, red = failed
+    if (ok) click(2000);        // camera-shutter tick on success
+    else    beep(400, 200);     // low buzz on failure (no card / write error)
   }
 
   if (uiState != UI_NORMAL) {
     if      (be == BOOT_SHORT)  { navActivate(); }
-    else if (pw == PWRON_SHORT) { navDown(); beep(1800, 20); }
+    else if (pw == PWRON_SHORT) { navDown(); click(1800); }
     // PWRON_LONG falls through — AXP2101 owns it (hardware power-off).
   } else {
     // No modal up. Physical keys no longer flip views/pages — that's touch
@@ -1805,7 +1818,7 @@ void loop() {
     //   • PWRON short → blank/toggle the screen, from any home view
     //   • BOOT  short → open the menu
     if (pw == PWRON_SHORT) { screenOn = !screenOn; applyBrightness(); }
-    if (be == BOOT_SHORT)  { enterState(UI_MENU_MAIN); beep(800, 60); }
+    if (be == BOOT_SHORT)  { enterState(UI_MENU_MAIN); click(800); }
   }
 
   // ── touch dispatch ──
@@ -1841,17 +1854,17 @@ void loop() {
       // Up/down cycle the home views (down = forward, up = back). Menu now
       // opens on BOOT long only.
       if      (ev.kind == GESTURE_SWIPE_DOWN) {
-        displayMode = DISP_PET; petPage = 0; beep(1800, 30);
+        displayMode = DISP_PET; petPage = 0; clickSoft(700);
       } else if (ev.kind == GESTURE_SWIPE_UP) {
-        displayMode = DISP_INFO; infoPage = 0; beep(1800, 30);
+        displayMode = DISP_INFO; infoPage = 0; clickSoft(700);
       } else if (ev.kind == GESTURE_SWIPE_RIGHT) {
         // Home: swipe through characters. Right = next, left = previous.
-        cycleSpecies(+1); beep(1800, 30);
+        cycleSpecies(+1); clickSoft(700);
       } else if (ev.kind == GESTURE_SWIPE_LEFT) {
-        cycleSpecies(-1); beep(1800, 30);
+        cycleSpecies(-1); clickSoft(700);
       } else if (ev.kind == GESTURE_TAP && ev.y >= HUD_TOP) {
         // Tap the transcript strip → open the full-screen log.
-        displayMode = DISP_TRANSCRIPT; tScroll = 0; beep(1800, 30);
+        displayMode = DISP_TRANSCRIPT; tScroll = 0; clickSoft(700);
       }
     } else if (displayMode == DISP_TRANSCRIPT) {
       // Full-screen log: swipe up (or tap) closes — same as dismissing a
@@ -1859,30 +1872,30 @@ void loop() {
       // always lands back at the live tail.
       const uint8_t step = (TRANS_ROWS > 1) ? TRANS_ROWS - 1 : 1;
       if      (ev.kind == GESTURE_SWIPE_UP || ev.kind == GESTURE_TAP) {
-        displayMode = DISP_NORMAL; beep(1800, 30);
+        displayMode = DISP_NORMAL; clickSoft(700);
       } else if (ev.kind == GESTURE_SWIPE_DOWN) {
-        tScroll += step; beep(1800, 20);
+        tScroll += step; clickSoft(700);
       }
     } else if (displayMode == DISP_PET) {
       if      (ev.kind == GESTURE_SWIPE_DOWN) {
-        displayMode = DISP_INFO; infoPage = 0; beep(1800, 30);
+        displayMode = DISP_INFO; infoPage = 0; clickSoft(700);
       } else if (ev.kind == GESTURE_SWIPE_UP) {
-        displayMode = DISP_NORMAL; beep(1800, 30);
+        displayMode = DISP_NORMAL; clickSoft(700);
       } else if (ev.kind == GESTURE_SWIPE_LEFT) {
         // Book convention: drag finger right-to-left to reveal next page.
-        petPage = (petPage + 1) % PET_PAGES; beep(1800, 30);
+        petPage = (petPage + 1) % PET_PAGES; clickSoft(700);
       } else if (ev.kind == GESTURE_SWIPE_RIGHT) {
-        petPage = (petPage + PET_PAGES - 1) % PET_PAGES; beep(1800, 30);
+        petPage = (petPage + PET_PAGES - 1) % PET_PAGES; clickSoft(700);
       }
     } else if (displayMode == DISP_INFO) {
       if      (ev.kind == GESTURE_SWIPE_DOWN) {
-        displayMode = DISP_NORMAL; beep(1800, 30);
+        displayMode = DISP_NORMAL; clickSoft(700);
       } else if (ev.kind == GESTURE_SWIPE_UP) {
-        displayMode = DISP_PET; petPage = 0; beep(1800, 30);
+        displayMode = DISP_PET; petPage = 0; clickSoft(700);
       } else if (ev.kind == GESTURE_SWIPE_LEFT) {
-        infoPage = (infoPage + 1) % INFO_PAGES; beep(1800, 30);
+        infoPage = (infoPage + 1) % INFO_PAGES; clickSoft(700);
       } else if (ev.kind == GESTURE_SWIPE_RIGHT) {
-        infoPage = (infoPage + INFO_PAGES - 1) % INFO_PAGES; beep(1800, 30);
+        infoPage = (infoPage + INFO_PAGES - 1) % INFO_PAGES; clickSoft(700);
       }
     }
   }
