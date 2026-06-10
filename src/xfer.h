@@ -52,6 +52,10 @@ extern bool gifAvailable;
 // work. Defined in main.cpp.
 void debugPose(uint8_t s, uint32_t durMs);
 
+// Panel blink confirming a cmd:shot capture (white = saved, red = failed)
+// — visible feedback for muted devices. Defined in main.cpp.
+void shotFlash(bool ok);
+
 // Which channel the line being dispatched arrived on — set by dataPoll()
 // before it feeds USB or BLE bytes into _applyJson. Replies go back to the
 // same channel: BLE acks over NUS (mirrored to Serial in verbose builds),
@@ -181,6 +185,7 @@ inline bool xferCommand(JsonDocument& doc) {
     // appeared on the card.
     char path[40];
     bool ok = screenshotSave(path, sizeof(path));
+    shotFlash(ok);
     char b[96];
     int len = snprintf(b, sizeof(b),
       "{\"ack\":\"shot\",\"ok\":%s,\"n\":0,\"path\":\"%s\"}\n",

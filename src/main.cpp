@@ -1177,6 +1177,23 @@ static void applyBrightness() {
   if (dispOk) gfx.setBrightness(screenOn ? MAP[brightLevel] : 0);
 }
 
+// Visual "shutter" confirmation for screenshotSave() — the beeper can be
+// inaudible (muted device, noisy room), so blink the whole panel for
+// ~90 ms: white = saved, red = failed. Runs AFTER the BMP is written, so
+// the flash itself never lands in the capture, and the next render pass
+// repaints the canvas anyway. Brightness is forced up for the blink and
+// applyBrightness() restores the screenOn-aware level — meaning the flash
+// is visible even on a blanked panel (cmd:shot with the screen off).
+// Called from the BOOT-hold handler below and xfer.h's cmd:shot.
+void shotFlash(bool ok) {
+  if (!dispOk) return;
+  gfx.fillSprite(ok ? 0xFFFF : 0xF800);
+  gfx.pushSprite();
+  gfx.setBrightness(230);
+  delay(90);
+  applyBrightness();
+}
+
 static void drawSettingsMenu() {
   drawModal("SETTINGS", SETTINGS_N, 0xFFE0);
   Settings& s = settings();
@@ -1774,7 +1791,8 @@ void loop() {
   if (be == BOOT_LONG) {
     beep(1200, 30);
     bool ok = screenshotSave();
-    beep(ok ? 1800 : 400, ok ? 60 : 200);   // high chirp = saved, low = failed
+    shotFlash(ok);                          // white blink = saved, red = failed
+    beep(ok ? 1800 : 400, ok ? 60 : 200);   // audible twin of the flash
   }
 
   if (uiState != UI_NORMAL) {
