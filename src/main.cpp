@@ -3,14 +3,16 @@
 // What's wired:
 //   • Home (CAT species + transcript HUD)  ← 3i.2
 //   • Approval screen with swipe APPROVE / DENY  ← 3i.2
-//   • Main menu (BOOT long to open)  ← 3i.3
+//   • Main menu (BOOT tap to open; BOOT hold saves a screenshot)  ← 3i.3
 //   • Settings sub-menu — tap a row toggles / cycles the value
 //   • Reset sub-menu — tap an item opens a confirm modal (replaces M5's
 //     tap-twice arm/fire pattern)
 //   • Confirm modal — two buttons (Cancel / Confirm), tap outside cancels
 //
 // Modal stack rules:
-//   • BOOT long from home   → open main menu
+//   • BOOT tap              → open main menu / activate highlighted item
+//   • BOOT hold (any state) → screenshot to SD (screenshot.h)
+//   • PWRON tap in a modal  → wrap the highlight down through the items
 //   • swipe up in a modal   → close the menu
 //   • tap a menu row        → execute (apply setting, open sub, etc.)
 //   • swipe down anywhere   → step back one level (CONFIRM → RESET →
@@ -40,6 +42,7 @@
 #include "hal/rtc.h"
 #include "hal/touch.h"
 #include "hal/storage.h"
+#include "screenshot.h"
 #include "ble_bridge.h"
 #include "data.h"          // pulls in stats.h
 #include "buddy.h"
@@ -815,7 +818,8 @@ static void drawInfoButtons() {
   k(0xFFFF, "swipe ^",       "prev view");
   y += 10;
   k(0xFFE0, "PWR tap",       "screen off");
-  k(0xFFE0, "BOOT hold",     "open menu");
+  k(0xFFE0, "BOOT tap",      "menu/select");
+  k(0xFFE0, "BOOT hold",     "screenshot");
   k(0xFFE0, "PWR hold",      "power off");
 }
 
@@ -1445,10 +1449,12 @@ static void handleModalGesture(const GestureEvent& ev) {
 
 // ── physical buttons (3i.3) ────────────────────────────────────────────────
 //
-// BOOT (GPIO0, active-low, internal pull-up) is the modal cursor: short tap
-// moves the highlight up, long press (≥600 ms) activates the highlighted
-// item. PWRON IRQ on the AXP2101 drives the highlight down; a long PWRON
-// hold still hits the chip's hardware power-off path, untouched.
+// BOOT (GPIO0, active-low, internal pull-up): short tap opens the menu from
+// home and activates the highlighted item inside a modal; long press
+// (≥600 ms) saves a screenshot from any state (screenshot.h). PWRON IRQ on
+// the AXP2101 is the cursor — short press wraps the highlight down through
+// the items; a long PWRON hold still hits the chip's hardware power-off
+// path, untouched.
 //
 // Touch stays as a parallel input — small finger-friendly targets are
 // hard on the 368×448 panel, hence this physical fallback.
@@ -1482,12 +1488,6 @@ static BootEvent pollBoot() {
   return BOOT_NONE;
 }
 
-static void navUp() {
-  int n = currentMenuItems();
-  if (uiState == UI_CONFIRM) { navIdx ^= 1; return; }
-  if (n <= 0) return;
-  navIdx = (navIdx + n - 1) % n;
-}
 static void navDown() {
   int n = currentMenuItems();
   if (uiState == UI_CONFIRM) { navIdx ^= 1; return; }
@@ -1769,19 +1769,25 @@ void loop() {
     }
   }
 
+  // BOOT hold = screenshot from ANY state — home, menus, modals. One
+  // gesture, one meaning, so the buttons never need per-mode re-learning.
+  if (be == BOOT_LONG) {
+    beep(1200, 30);
+    bool ok = screenshotSave();
+    beep(ok ? 1800 : 400, ok ? 60 : 200);   // high chirp = saved, low = failed
+  }
+
   if (uiState != UI_NORMAL) {
-    if      (be == BOOT_SHORT)  { navUp();   beep(1800, 20); }
-    else if (be == BOOT_LONG)   { navActivate(); }
+    if      (be == BOOT_SHORT)  { navActivate(); }
     else if (pw == PWRON_SHORT) { navDown(); beep(1800, 20); }
     // PWRON_LONG falls through — AXP2101 owns it (hardware power-off).
   } else {
     // No modal up. Physical keys no longer flip views/pages — that's touch
     // only now (the swipe block below). Each key does exactly one thing here:
     //   • PWRON short → blank/toggle the screen, from any home view
-    //   • BOOT  long  → open the menu
-    // (BOOT short is intentionally inert outside menus.)
+    //   • BOOT  short → open the menu
     if (pw == PWRON_SHORT) { screenOn = !screenOn; applyBrightness(); }
-    if (be == BOOT_LONG)   { enterState(UI_MENU_MAIN); beep(800, 60); }
+    if (be == BOOT_SHORT)  { enterState(UI_MENU_MAIN); beep(800, 60); }
   }
 
   // ── touch dispatch ──

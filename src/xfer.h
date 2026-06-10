@@ -10,10 +10,12 @@
 #include "stats.h"
 #include "buddy.h"
 #include "debug.h"
+#include "screenshot.h"
 
 // AMOLED port of xfer.h. Same wire protocol as the M5 build (REFERENCE.md):
 // cmd:char_begin / cmd:file / cmd:chunk / cmd:file_end / cmd:char_end,
-// plus the housekeeping cmd:status / name / owner / species / unpair.
+// plus the housekeeping cmd:status / name / owner / species / unpair and
+// the debug-only cmd:pose / cmd:shot (screenshot to SD).
 //
 // Differences from M5:
 //   • LittleFS replaced by hal/storage.h — files go onto SD if a card is
@@ -169,6 +171,21 @@ inline bool xferCommand(JsonDocument& doc) {
     bool ok = (s >= 0 && s <= 6);
     if (ok) debugPose((uint8_t)s, doc["ms"] | 5000);
     _xAck("pose", ok);
+    return true;
+  }
+
+  if (strcmp(cmd, "shot") == 0) {
+    // Debug-only: {"cmd":"shot"} — save the current frame as a BMP onto
+    // SD/LittleFS (same writer as the BOOT-hold binding; screenshot.h).
+    // Ack carries the saved path so the host knows which file just
+    // appeared on the card.
+    char path[40];
+    bool ok = screenshotSave(path, sizeof(path));
+    char b[96];
+    int len = snprintf(b, sizeof(b),
+      "{\"ack\":\"shot\",\"ok\":%s,\"n\":0,\"path\":\"%s\"}\n",
+      ok ? "true" : "false", path);
+    _xReply(b, len);
     return true;
   }
 
