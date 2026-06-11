@@ -1,8 +1,10 @@
 #include "screenshot.h"
 #include "hal/display.h"
 #include "hal/storage.h"
+#include "hal/power.h"
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
+#include <esp_task_wdt.h>
 
 // Shared render surface, defined in main.cpp (same extern pattern as
 // clock.cpp / character.cpp).
@@ -84,7 +86,15 @@ bool screenshotSave(char* pathOut, size_t pathLen) {
       Serial.printf("[shot] write failed %s\n", path);
       return false;
     }
-    if ((y & 31) == 0) yield();              // keep FreeRTOS happy mid-write
+    if ((y & 31) == 0) {
+      // A slow card / LittleFS erase storm can stretch this loop past the
+      // watchdog windows — neither the AXP hardware WDT (8 s power-cut)
+      // nor the loop-task WDT (5 s panic) is fed while loop() is blocked
+      // in here. Feed both and yield so the IDLE task runs.
+      powerFeedWatchdog();
+      esp_task_wdt_reset();
+      yield();
+    }
   }
 
   f.close();

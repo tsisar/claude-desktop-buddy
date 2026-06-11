@@ -379,6 +379,12 @@ static const int HUD_ROWS   = 3;
 static const int HUD_ROW_PX = 18;
 static const int HUD_WIDTH  = 36;
 
+// Wrap scratch shared by drawHUD and drawTranscript — at most one of them
+// renders per frame, and two private static copies wasted 4.7 KB of
+// internal SRAM each.
+static char    wrapDisp[96][48];
+static uint8_t wrapSrc[96];
+
 // Home HUD: a compact, always-live tail of the transcript — the latest
 // HUD_ROWS wrapped lines, newest at the bottom in white, older greyed. No
 // manual scrolling here; tapping the strip opens the full-screen log
@@ -395,22 +401,20 @@ static void drawHUD() {
     return;
   }
 
-  static char disp[96][48];
-  static uint8_t srcOf[96];
   uint8_t nDisp = 0;
   for (uint8_t i = 0; i < tama.nLines && nDisp < 96; i++) {
-    uint8_t got = wrapInto(tama.lines[i], &disp[nDisp], 96 - nDisp, HUD_WIDTH);
-    for (uint8_t j = 0; j < got; j++) srcOf[nDisp + j] = i;
+    uint8_t got = wrapInto(tama.lines[i], &wrapDisp[nDisp], 96 - nDisp, HUD_WIDTH);
+    for (uint8_t j = 0; j < got; j++) wrapSrc[nDisp + j] = i;
     nDisp += got;
   }
   int start = (int)nDisp - HUD_ROWS; if (start < 0) start = 0;
   uint8_t newest = tama.nLines - 1;
   for (int i = 0; start + i < (int)nDisp; i++) {
     uint8_t row = start + i;
-    bool fresh = (srcOf[row] == newest);
+    bool fresh = (wrapSrc[row] == newest);
     gfx.setTextColor(fresh ? 0xFFFF : 0x8C71, 0x0000);
     gfx.setCursor(10, HUD_TOP + 12 + i * HUD_ROW_PX);
-    gfx.print(disp[row]);
+    gfx.print(wrapDisp[row]);
   }
 }
 
@@ -439,12 +443,10 @@ static void drawTranscript() {
     return;
   }
 
-  static char disp[96][48];
-  static uint8_t srcOf[96];
   uint8_t nDisp = 0;
   for (uint8_t i = 0; i < tama.nLines && nDisp < 96; i++) {
-    uint8_t got = wrapInto(tama.lines[i], &disp[nDisp], 96 - nDisp, HUD_WIDTH);
-    for (uint8_t j = 0; j < got; j++) srcOf[nDisp + j] = i;
+    uint8_t got = wrapInto(tama.lines[i], &wrapDisp[nDisp], 96 - nDisp, HUD_WIDTH);
+    for (uint8_t j = 0; j < got; j++) wrapSrc[nDisp + j] = i;
     nDisp += got;
   }
   uint8_t maxBack = (nDisp > TRANS_ROWS) ? (nDisp - TRANS_ROWS) : 0;
@@ -455,10 +457,10 @@ static void drawTranscript() {
   uint8_t newest = tama.nLines - 1;
   for (int i = 0; start + i < end; i++) {
     uint8_t row = start + i;
-    bool fresh = (srcOf[row] == newest) && (tScroll == 0);
+    bool fresh = (wrapSrc[row] == newest) && (tScroll == 0);
     gfx.setTextColor(fresh ? 0xFFFF : 0xC618, 0x0000);
     gfx.setCursor(10, TRANS_TOP + i * HUD_ROW_PX);
-    gfx.print(disp[row]);
+    gfx.print(wrapDisp[row]);
   }
 
   gfx.setTextDatum(BC_DATUM);
@@ -1235,16 +1237,18 @@ static void applyBrightness() {
 // applyBrightness() restores the screenOn-aware level — meaning the flash
 // is visible even on a blanked panel (cmd:shot with the screen off).
 // Called from the BOOT-hold handler below and xfer.h's cmd:shot.
+static uint32_t shotFlashUntil = 0;   // non-zero while the blink is showing
+
 void shotFlash(bool ok) {
   if (!dispOk) return;
-  // cmd:shot can land on a blanked panel — wake it for the blink;
-  // applyBrightness() below re-sleeps it if screenOn is still false.
+  // cmd:shot can land on a blanked panel — wake it for the blink; the
+  // render path re-applies brightness (and re-sleeps the panel) when the
+  // deadline below passes, so the loop never sits in a delay() here.
   if (panelAsleep) { gfx.displayOn(); panelAsleep = false; }
   gfx.fillSprite(ok ? 0xFFFF : 0xF800);
   gfx.pushSprite();
   gfx.setBrightness(230);
-  delay(90);
-  applyBrightness();
+  shotFlashUntil = millis() + 90;
 }
 
 static void drawSettingsMenu() {
@@ -1988,6 +1992,15 @@ void loop() {
   }
 
   // ── render ──
+  // Screenshot blink in progress: hold the white/red frame on the glass
+  // (no new flush overwrites it), then restore brightness — and re-sleep
+  // the panel if the screen is meant to be off — once the deadline passes.
+  if (shotFlashUntil) {
+    if ((int32_t)(now - shotFlashUntil) < 0) { delay(8); return; }
+    shotFlashUntil = 0;
+    applyBrightness();
+    nextDraw = 0;
+  }
   // Blanked panel: skip the whole compose + 322 KB QSPI flush — it used to
   // run at full pace (up to 25 Hz in SVG mode) into a sleeping panel, and
   // the blanked state is exactly the one battery life depends on. All the
@@ -2033,6 +2046,25 @@ void loop() {
   if (clocking != aodActive) {
     aodActive = clocking;
     applyBrightness();
+  }
+
+  // Clock-face dirty skip: the parked face only changes once per second
+  // (charge-state flips on the widget lag <=1 s — acceptable), yet it was
+  // recomposed and flushed at the full cadence — 4 of every 5 pushes were
+  // pixel-identical 322 KB QSPI transfers on the view the device spends
+  // most of its plugged-in life in. 0xFF = cache invalid (previous frame
+  // wasn't the face), so entry/exit always forces a full draw.
+  static uint8_t prevClockSec = 0xFF;
+  if (clocking) {
+    RtcTime ct;
+    if (rtcGetTime(&ct)) {
+      if (ct.Seconds == prevClockSec) { delay(8); return; }
+      prevClockSec = ct.Seconds;
+    } else {
+      prevClockSec = 0xFF;
+    }
+  } else {
+    prevClockSec = 0xFF;
   }
 
   // Passkey takes priority over everything except an actual approval

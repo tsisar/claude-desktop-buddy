@@ -28,6 +28,7 @@
 #include <FS.h>
 #include <AnimatedGIF.h>
 #include <ArduinoJson.h>
+#include <Arduino_GFX_Library.h>   // Arduino_Canvas — direct row blit below
 #include <string.h>
 
 extern Surface gfx;
@@ -149,9 +150,26 @@ static void gifDrawCb(GIFDRAW* d) {
   if (x0 < 0) { src -= x0; w += x0; x0 = 0; }
   if (x0 + w > gfx.width()) w = gfx.width() - x0;
   if (w <= 0) return;
-  for (int i = 0; i < w; i++) {
-    uint8_t idx = src[i];
-    gfx.drawPixel(x0 + i, y, (hasT && idx == t) ? pal.bg : pal16[idx]);
+  // Blit the row straight into the canvas framebuffer (same pattern the
+  // screenshot writer uses to read it). The old per-pixel path went
+  // through a virtual Arduino_Canvas::drawPixel per pixel — call +
+  // bounds/rotation overhead on >100K pixels per frame for large packs,
+  // dwarfing the LZW decode. Clipping already happened above, so the
+  // output is bit-identical.
+  Arduino_Canvas* cv = gfx.raw();
+  uint16_t* fb = cv ? cv->getFramebuffer() : nullptr;
+  uint16_t bg = pal.bg;
+  if (fb) {
+    uint16_t* row = fb + (int32_t)y * cv->width() + x0;
+    for (int i = 0; i < w; i++) {
+      uint8_t idx = src[i];
+      row[i] = (hasT && idx == t) ? bg : pal16[idx];
+    }
+  } else {
+    for (int i = 0; i < w; i++) {
+      uint8_t idx = src[i];
+      gfx.drawPixel(x0 + i, y, (hasT && idx == t) ? bg : pal16[idx]);
+    }
   }
 }
 
