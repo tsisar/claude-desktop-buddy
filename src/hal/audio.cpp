@@ -21,6 +21,14 @@ extern "C" {
 // and a dedicated FreeRTOS task synthesizes the PCM and writes it to I2S, so
 // the UI loop never stalls for the duration of a tone. (Pattern borrowed from
 // the upstream esp32 build's beepTask.)
+//
+// The whole chain (PA + I2S channel) stays enabled 24/7 BY DESIGN. A power
+// commit (2c7427c) gated it after 250 ms of quiet — both the full-chain and
+// the PA-only variants muted the hardware: the ES8311 (pure clock slave,
+// configured once at boot) doesn't reliably recover after its clocks stop,
+// and the amp's turn-on settle eats short clicks, so user-paced sounds all
+// landed on a cold chain. Don't re-add gating without an on-device test
+// plan (verified on hardware 2026-06-11).
 
 #define AUDIO_RATE   16000           // sample rate (Hz)
 #define MCLK_MULT    384             // MCLK = rate*384 = 6.144MHz (matches vendor)
@@ -190,38 +198,12 @@ static void synthClick(uint16_t freq, bool soft) {
   }
 }
 
-// The PA + I2S clock tree used to run 24/7 to play ~30 ms clicks: the amp
-// sat enabled with its quiescent draw and MCLK/BCLK/WS toggled continuously
-// (6.144 MHz MCLK) — a constant multi-mA waste on a 350 mAh cell, plus idle
-// hiss. Now the chain powers up on the first queued sound and back down
-// after 250 ms of quiet, merging bursts so menu navigation doesn't thrash it.
-static void chainUp() {
-  digitalWrite(AUDIO_PA_EN, HIGH);
-  if (tx_chan) i2s_channel_enable(tx_chan);
-  // ~16 ms of silence absorbs the amp's turn-on settle so the first real
-  // samples don't ride on a pop.
-  static const int16_t zeros[128] = {0};   // 64 stereo frames = 4 ms
-  for (int i = 0; i < 4; i++) i2sWrite(zeros, sizeof(zeros));
-}
-
-static void chainDown() {
-  if (tx_chan) i2s_channel_disable(tx_chan);
-  digitalWrite(AUDIO_PA_EN, LOW);
-}
-
 static void audioTask(void*) {
   AudioReq r;
-  bool up = false;
-  for (;;) {
-    if (xQueueReceive(s_q, &r, up ? pdMS_TO_TICKS(250) : portMAX_DELAY) == pdTRUE) {
-      if (!up) { chainUp(); up = true; }
-      if      (r.kind == AK_CLICK)      synthClick(r.freq, false);
-      else if (r.kind == AK_CLICK_SOFT) synthClick(r.freq, true);
-      else                              synthBeep(r.freq, r.ms);
-    } else if (up) {
-      chainDown();
-      up = false;
-    }
+  while (xQueueReceive(s_q, &r, portMAX_DELAY) == pdTRUE) {
+    if      (r.kind == AK_CLICK)      synthClick(r.freq, false);
+    else if (r.kind == AK_CLICK_SOFT) synthClick(r.freq, true);
+    else                              synthBeep(r.freq, r.ms);
   }
 }
 
@@ -240,12 +222,8 @@ bool audioInit(TwoWire& /*w*/) {
   // never blocks for the length of a tone.
   s_q = xQueueCreate(8, sizeof(AudioReq));
   if (!s_q) { Serial.println("[audio] queue alloc failed"); ok = false; return false; }
-  audioSetVolume(DEFAULT_VOLUME);   // apply the remapped boot level
-  // Idle the chain until the first sound: codecInit() above only needed the
-  // clocks during register setup; the ES8311 keeps its config over I2C and
-  // resyncs to the bit clocks when the task re-enables them.
-  chainDown();
   xTaskCreatePinnedToCore(audioTask, "audio", 4096, nullptr, 5, nullptr, tskNO_AFFINITY);
+  audioSetVolume(DEFAULT_VOLUME);   // apply the remapped boot level
   return true;
 }
 
