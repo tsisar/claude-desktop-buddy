@@ -44,7 +44,8 @@
 #include "hal/storage.h"
 #include "screenshot.h"
 #include "ble_bridge.h"
-#include "data.h"          // pulls in stats.h
+#include "data.h"
+#include "stats.h"
 #include "buddy.h"
 #include "buddy_common.h"
 #include "blockart.h"
