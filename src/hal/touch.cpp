@@ -117,6 +117,18 @@ bool touchInit(TwoWire& w) {
 
 bool touchOk() { return ok; }
 
+// FT3168 power-mode register (FocalTech G_PMODE, 0xA5): 0 = active scan,
+// 1 = monitor (low-rate autonomous scan, returns to active on touch).
+// Hibernate (3) is deliberately not used — leaving it needs a hard reset.
+void touchSetLowPower(bool low) {
+  static bool curLow = false;
+  if (!ok || !bus || low == curLow) return;
+  bus->beginTransmission(TOUCH_ADDR);
+  bus->write(0xA5);
+  bus->write(low ? 0x01 : 0x00);
+  if (bus->endTransmission() == 0) curLow = low;
+}
+
 bool touchRead(uint16_t* x, uint16_t* y) {
   if (!ok) { touchTryReinit(); return false; }
   // Point register at 0x02 (touch-count), then read the 5-byte block.

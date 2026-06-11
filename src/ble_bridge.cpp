@@ -158,6 +158,13 @@ void bleInit(const char* deviceName) {
   adv->setScanResponse(true);
   adv->setMinPreferred(0x06);
   adv->setMaxPreferred(0x12);
+  // Advertising interval (NOT the preferred-connection fields above, which
+  // only annotate the advertisement): the stack default is the fast ~50 ms
+  // tier, a steady high-hundreds-of-uA drain that ran forever whenever no
+  // host was connected. A bonded desk device reconnects fine at 0.5-1 s.
+  // Units of 0.625 ms: 0x0320 = 500 ms, 0x0640 = 1 s.
+  adv->setMinInterval(0x0320);
+  adv->setMaxInterval(0x0640);
   BLEDevice::startAdvertising();
   Serial.printf("[ble] advertising as '%s'\n", deviceName);
 }
@@ -204,7 +211,10 @@ size_t bleWrite(const uint8_t* data, size_t len) {
     txChar->setValue((uint8_t*)(data + sent), n);
     txChar->notify();
     sent += n;
-    delay(4);
+    // Pace only BETWEEN chunks: the unconditional trailing delay(4) cost
+    // the main loop a guaranteed 4 ms per write — every ack is a single
+    // chunk, so a 6000-chunk pack install accumulated ~24 s of pure sleep.
+    if (sent < len) delay(4);
   }
   return sent;
 }

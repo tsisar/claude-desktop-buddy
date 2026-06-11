@@ -96,3 +96,6 @@ void Surface::drawString(const char* s, int16_t x, int16_t y) {
 }
 
 void Surface::setBrightness(uint8_t b) { if (_pnl) _pnl->setBrightness(b); }
+
+void Surface::displayOff() { if (_pnl) _pnl->displayOff(); }
+void Surface::displayOn()  { if (_pnl) _pnl->displayOn(); }

@@ -20,9 +20,11 @@ bool imuInit(TwoWire& w) {
     return false;
   }
   // ±8g range covers shake (delta > 0.8g) and face-down detection with
-  // headroom. 1000Hz ODR is plenty — we sample at most 20Hz from the loop.
+  // headroom. The loop samples at most 20 Hz, so 125 Hz ODR is already 6x
+  // oversampled — running the chip's internal scan at 1000 Hz only burned
+  // battery for samples nobody read.
   imu.configAccelerometer(SensorQMI8658::ACC_RANGE_8G,
-                          SensorQMI8658::ACC_ODR_1000Hz,
+                          SensorQMI8658::ACC_ODR_125Hz,
                           SensorQMI8658::LPF_MODE_0);
   imu.enableAccelerometer();
   ok = true;

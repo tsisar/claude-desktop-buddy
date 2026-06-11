@@ -84,6 +84,12 @@ public:
   // Panel-level (not on the canvas in TFT_eSPI, but handy): 0..255.
   void setBrightness(uint8_t b);
 
+  // SH8601 sleep in/out (SLPIN/SLPOUT, ~240 ms each, blocking). Brightness 0
+  // alone leaves the panel controller, gate drivers and QSPI interface fully
+  // powered — sleep is what actually saves power while blanked.
+  void displayOff();
+  void displayOn();
+
   // Raw canvas for the GIF decoder's per-pixel draw callback.
   Arduino_Canvas* raw() { return _cv; }
 

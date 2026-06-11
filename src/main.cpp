@@ -198,6 +198,17 @@ static uint8_t brightLevel = 4;
 // PWRON-short brings the screen straight back without expander re-init.
 static bool screenOn = true;
 
+// Render pacing deadline. File-scope (not a loop() static) so wake() and
+// the PWRON toggle can zero it — the first frame after a relight renders
+// on the next loop pass instead of showing stale pixels for up to 200 ms.
+static uint32_t nextDraw = 0;
+// Parked clock face dims to the lowest brightness tier (AOD) — burn-in
+// protection for the days-long USB park. Owned by the render path below.
+static bool aodActive = false;
+// SH8601 is in SLPIN while blanked; applyBrightness()/shotFlash() own the
+// transitions (sleep in/out block ~240 ms each, paid once per blank/wake).
+static bool panelAsleep = false;
+
 // BLE advertise name "Claude-XXXX" — populated in setup() and surfaced on
 // the INFO/BLUETOOTH page so the user knows which device is theirs when
 // multiple are in range.
@@ -277,6 +288,7 @@ static void wake() {
     screenOn = true;
     applyBrightness();
     wakeTransitionMs = millis() + 12000;
+    nextDraw = 0;   // render the first frame on the next pass, not +200 ms
   }
 }
 
@@ -1196,9 +1208,23 @@ static const int SETTINGS_N = sizeof(SETTINGS_ITEMS) / sizeof(SETTINGS_ITEMS[0])
 static void applyBrightness() {
   // Surface::setBrightness() forwards to the SH8601 panel. 0..255 range.
   // Map our 5 tiers to a comfortable curve (dim but readable to full).
-  // screenOn=false short-circuits to 0 — the PWRON screen-toggle path.
+  // Blanked = brightness 0 PLUS panel sleep-in + touch monitor mode:
+  // brightness 0 alone left the SH8601 controller, gate drivers and QSPI
+  // interface fully powered and the FT3168 in full active scan — the "off"
+  // state battery life depends on cost nearly as much as "on". The parked
+  // clock face (aodActive) dims to the lowest tier so days on USB don't
+  // burn the digits into the panel.
   static const uint8_t MAP[5] = { 40, 80, 130, 180, 230 };
-  if (dispOk) gfx.setBrightness(screenOn ? MAP[brightLevel] : 0);
+  if (!dispOk) return;
+  if (screenOn) {
+    if (panelAsleep) { gfx.displayOn(); panelAsleep = false; }
+    gfx.setBrightness(aodActive ? MAP[0] : MAP[brightLevel]);
+    touchSetLowPower(false);
+  } else {
+    gfx.setBrightness(0);
+    if (!panelAsleep) { gfx.displayOff(); panelAsleep = true; }
+    touchSetLowPower(true);
+  }
 }
 
 // Visual "shutter" confirmation for screenshotSave() — the beeper can be
@@ -1211,6 +1237,9 @@ static void applyBrightness() {
 // Called from the BOOT-hold handler below and xfer.h's cmd:shot.
 void shotFlash(bool ok) {
   if (!dispOk) return;
+  // cmd:shot can land on a blanked panel — wake it for the blink;
+  // applyBrightness() below re-sleeps it if screenOn is still false.
+  if (panelAsleep) { gfx.displayOn(); panelAsleep = false; }
   gfx.fillSprite(ok ? 0xFFFF : 0xF800);
   gfx.pushSprite();
   gfx.setBrightness(230);
@@ -1670,7 +1699,6 @@ void setup() {
 }
 
 void loop() {
-  static uint32_t nextDraw = 0;
   uint32_t now = millis();
 
   // Pet both watchdogs every pass. The AXP2101 hardware WDT (8s) is the real
@@ -1831,13 +1859,24 @@ void loop() {
     // only now (the swipe block below). Each key does exactly one thing here:
     //   • PWRON short → blank/toggle the screen, from any home view
     //   • BOOT  short → open the menu
-    if (pw == PWRON_SHORT) { screenOn = !screenOn; applyBrightness(); }
+    if (pw == PWRON_SHORT) {
+      screenOn = !screenOn;
+      applyBrightness();
+      if (screenOn) nextDraw = 0;   // relight shows a fresh frame at once
+    }
     if (be == BOOT_SHORT)  { enterState(UI_MENU_MAIN); click(800); }
   }
 
   // ── touch dispatch ──
   bc(LS_TOUCH);
-  gestureUpdate();
+  // While blanked the FT3168 sits in monitor mode and only a double-tap
+  // wakes — poll at 50 ms instead of every ~8 ms pass (was ~250 I2C
+  // transactions/s against a sleeping panel).
+  static uint32_t lastBlankPollMs = 0;
+  if (screenOn || now - lastBlankPollMs >= 50) {
+    lastBlankPollMs = now;
+    gestureUpdate();
+  }
   GestureEvent ev = gestureGet();
   bool inPrompt = tama.promptId[0] && !responseSent;
 
@@ -1914,7 +1953,47 @@ void loop() {
     }
   }
 
+  // ── low-battery stats flush ──
+  // The AXP2101 hard-cuts power at ~5% SoC; token progress accumulated in
+  // RAM (it persists on level-up only) would vanish with it. One-shot
+  // flush at 15% on battery; re-arms after a recharge or on USB.
+  static bool lowBattFlushed = false;
+  static uint32_t lastBattCheckMs = 0;
+  if (now - lastBattCheckMs >= 5000) {
+    lastBattCheckMs = now;
+    if (powerOk()) {
+      int pct = batteryPercent();
+      if (!onUsb() && pct >= 0 && pct <= 15) {
+        if (!lowBattFlushed) {
+          lowBattFlushed = true;
+          statsMarkDirty();
+          statsSave();
+          Serial.printf("[pwr] low battery (%d%%) — stats flushed\n", pct);
+        }
+      } else if (onUsb() || pct > 20) {
+        lowBattFlushed = false;
+      }
+    }
+  }
+
+  // ── CPU clock follows the panel ──
+  // 240 MHz lit or mid-transfer, 80 MHz blanked. BLE, I2S and USB-CDC run
+  // from APB/PLL clocks the divider doesn't touch, and nothing the blanked
+  // loop does (touch/PMU polls, JSON heartbeats) needs 240 MHz.
+  static bool cpuFast = true;
+  bool wantFast = screenOn || xferActive();
+  if (wantFast != cpuFast) {
+    cpuFast = wantFast;
+    setCpuFrequencyMhz(wantFast ? 240 : 80);
+  }
+
   // ── render ──
+  // Blanked panel: skip the whole compose + 322 KB QSPI flush — it used to
+  // run at full pace (up to 25 Hz in SVG mode) into a sleeping panel, and
+  // the blanked state is exactly the one battery life depends on. All the
+  // wake paths (data pump, IMU, buttons, double-tap) ran above; xfer keeps
+  // the fast tick so a host push arriving while blanked isn't throttled.
+  if (!screenOn) { delay(xferActive() ? 8 : 40); return; }
   if (!dispOk || now < nextDraw) { delay(8); return; }
   // SVG characters are time-indexed: every layer maps the shared cycle
   // onto its own frame count, so frame holds aren't multiples of any one
@@ -1948,6 +2027,13 @@ void loop() {
   bool clocking = parkedClockable()
                && (now - lastInteractMs > IDLE_MS)
                && (onUsb() || (now - lastInteractMs <= IDLE_MS + BATTERY_CLOCK_MS));
+
+  // Parked face = AOD: dim to the lowest tier while it shows (burn-in
+  // protection for the days-long USB park), restore on any other view.
+  if (clocking != aodActive) {
+    aodActive = clocking;
+    applyBrightness();
+  }
 
   // Passkey takes priority over everything except an actual approval
   // prompt — the user has 30s to type the code into the desktop.

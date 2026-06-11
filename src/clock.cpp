@@ -42,6 +42,14 @@ void clockDrawFace() {
   RtcTime tm; RtcDate dt;
   if (!rtcGetTime(&tm) || !rtcGetDate(&dt)) return;
 
+  // AMOLED anti-burn-in: nudge the whole face (and the battery widget) by
+  // a few pixels on a slow cycle driven by the minutes, so the parked face
+  // — which on USB power stays up for days — never drives the exact same
+  // pixels for hours. Full ±4 px pattern repeats hourly; invisible at a
+  // glance, decisive for the SH8601's lifetime.
+  int dx = (int)(tm.Minutes % 8) - 4;
+  int dy = (int)((tm.Minutes / 8) % 8) - 4;
+
   char hm[6]; snprintf(hm, sizeof(hm), "%02u:%02u", tm.Hours, tm.Minutes);
   // Seconds on their own row — drop the leading colon (it only made sense
   // when they used to sit inline after the minutes).
@@ -54,15 +62,15 @@ void clockDrawFace() {
   gfx.setTextDatum(MC_DATUM);
   gfx.setTextSize(8);
   gfx.setTextColor(0xFFFF, 0x0000);
-  gfx.drawString(hm, W / 2, H / 2 - 40);
+  gfx.drawString(hm, W / 2 + dx, H / 2 - 40 + dy);
 
   gfx.setTextSize(4);
   gfx.setTextColor(0xC618, 0x0000);
-  gfx.drawString(ss, W / 2, H / 2 + 50);
+  gfx.drawString(ss, W / 2 + dx, H / 2 + 50 + dy);
 
   gfx.setTextSize(3);
-  gfx.drawString(dl, W / 2, H / 2 + 110);
+  gfx.drawString(dl, W / 2 + dx, H / 2 + 110 + dy);
   gfx.setTextDatum(TL_DATUM);
 
-  drawBatteryWidget(W - 14 - 14 - SAFE, 14 + SAFE);   // top-right
+  drawBatteryWidget(W - 14 - 14 - SAFE + dx, 14 + SAFE + dy);   // top-right
 }
