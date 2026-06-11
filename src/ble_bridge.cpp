@@ -142,8 +142,13 @@ void bleInit(const char* deviceName) {
   svc->start();
 
   // LE Secure Connections + MITM + bonding, DisplayOnly so a passkey shows.
+  // setCapability is NOT optional: the NimBLE setAuthenticationMode overload
+  // only sets sm_bonding/sm_mitm/sm_sc and leaves io_cap at the constructor
+  // default NoInputNoOutput — which forces "Just Works" pairing regardless
+  // of the MITM bit, silently skipping the passkey exchange the UI renders.
   BLESecurity* sec = new BLESecurity();
   sec->setAuthenticationMode(/*bonding*/ true, /*mitm*/ true, /*sc*/ true);
+  sec->setCapability(ESP_IO_CAP_OUT);   // DisplayOnly — device shows a passkey
   sec->setKeySize(16);
   sec->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
   sec->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
