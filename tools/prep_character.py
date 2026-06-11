@@ -15,6 +15,7 @@ TARGET_W = 96
 REF_W    = 1000   # normalize to this before computing the cross-state bbox
 PROJECT  = Path(__file__).resolve().parent.parent
 OUT_ROOT = PROJECT / "characters"
+CAP      = 1_800_000   # bytes — must match flash_character.py's hard cap
 
 
 def _load_normalized(src_path: Path) -> tuple[list[Image.Image], list[int]]:
@@ -109,10 +110,10 @@ def install(src: Path) -> None:
         "states": device_states,
     }, indent=2))
 
-    cap_kb = 1800
     print(f"\nwrote {name}: {total:,} bytes -> {out}")
-    if total > cap_kb * 1024:
-        print(f"  warning: over {cap_kb}KB — desktop install will reject it")
+    if total > CAP:
+        print(f"  warning: over {CAP:,} bytes — flash_character.py / desktop "
+              f"install will reject it")
         if not shutil.which("gifsicle"):
             hint = {
                 "darwin": "brew install gifsicle",

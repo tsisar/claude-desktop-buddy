@@ -2,10 +2,13 @@
 """Prove the Stick reacts to serial JSON. Cycles states every 3s."""
 import json, time, serial, glob, sys
 
-ports = glob.glob('/dev/cu.usbserial-*')
-if not ports: sys.exit("no stick found")
-s = serial.Serial(ports[0], 115200)
-print(f"writing to {ports[0]} — watch the Stick\n")
+# ESP32-S3 native USB-CDC enumerates as /dev/ttyACM* on Linux — same port
+# usb_test_bridge.py / usb_xfer_send.py default to (/dev/ttyACM0).
+ports = sorted(glob.glob('/dev/ttyACM*')) or ['/dev/ttyACM0']
+# dsrdtr/rtscts off so opening the port doesn't toggle DTR (matches the
+# bridges; native USB-CDC ignores it anyway).
+s = serial.Serial(ports[0], 115200, dsrdtr=False, rtscts=False)
+print(f"writing to {ports[0]} — watch the device\n")
 
 states = [
     {"total": 0, "running": 0, "waiting": 0},  # → sleep

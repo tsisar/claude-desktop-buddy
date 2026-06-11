@@ -88,8 +88,11 @@ class FakeBridge:
                     self.pending_prompt_id = None
 
     async def time_sync(self):
-        # time.timezone is seconds WEST of UTC; the device wants east-positive
-        tz_east = -time.timezone if not time.daylight else -time.altzone
+        # The device wants seconds EAST of UTC. tm_gmtoff already is that,
+        # for the *current* moment — so DST is accounted for only when it's
+        # actually in effect (time.daylight merely means the zone HAS DST
+        # rules).
+        tz_east = time.localtime().tm_gmtoff
         await self.send({"time": [int(time.time()), int(tz_east)]})
 
     async def owner(self, name):

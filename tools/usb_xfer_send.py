@@ -19,13 +19,9 @@ Usage:
   tools/usb_xfer_send.sh ./my-axolotl
   tools/usb_xfer_send.sh ./my-axolotl --port /dev/ttyACM0
 
-Quick sanity test (any non-GIF bytes are fine for verifying the receive
-path lands files on storage; the renderer in Stage 4d will be the one
-that cares about format):
-  mkdir -p /tmp/testpack
-  echo 'hi' > /tmp/testpack/sleep.gif
-  echo '{"name":"test"}' > /tmp/testpack/manifest.json
-  tools/usb_xfer_send.sh /tmp/testpack
+The device loads the pack on char_end (characterInit), so the pack must
+be valid: a manifest.json with correct file names plus the GIFs it
+references. Use tools/prep_character.py to build one.
 """
 
 import argparse
@@ -177,28 +173,42 @@ def main():
 
         for i, (fname, fpath, fsize) in enumerate(files, 1):
             print(f"[push] [{i}/{len(files)}] file '{fname}' ({fsize}B)")
-            send_and_ack(ser, {"cmd": "file", "path": fname, "size": fsize},
-                         ack_queue, "file")
+            ack = send_and_ack(ser, {"cmd": "file", "path": fname,
+                                     "size": fsize}, ack_queue, "file")
+            if not ack.get("ok"):
+                print(f"[push] 'file' FAILED for '{fname}' (device could "
+                      f"not open it for writing): {ack}")
+                return 1
             with open(fpath, "rb") as f:
+                sent = 0
                 while True:
                     raw = f.read(args.chunk)
                     if not raw:
                         break
                     b64 = base64.b64encode(raw).decode("ascii")
-                    send_and_ack(ser, {"cmd": "chunk", "d": b64},
-                                 ack_queue, "chunk")
+                    ack = send_and_ack(ser, {"cmd": "chunk", "d": b64},
+                                       ack_queue, "chunk")
+                    if not ack.get("ok"):
+                        print(f"[push] 'chunk' FAILED for '{fname}' at "
+                              f"offset {sent} (device decode/write error): "
+                              f"{ack}")
+                        return 1
+                    sent += len(raw)
             ack = send_and_ack(ser, {"cmd": "file_end"}, ack_queue, "file_end")
             if not ack.get("ok"):
                 print(f"[push] file_end mismatch for {fname}: {ack}")
                 return 1
 
         ack = send_and_ack(ser, {"cmd": "char_end"}, ack_queue, "char_end")
-        if ack.get("ok"):
-            print(f"[push] DONE — character '{name}' installed and active")
-        else:
-            print(f"[push] receive OK, files are on storage")
-            print(f"[push] char_end ack=false because the renderer is stubbed")
-            print(f"[push] (Stage 4d will wire characterInit to read them)")
+        if not ack.get("ok"):
+            print("[push] char_end FAILED: characterInit could not load the "
+                  "pack — check manifest.json (valid JSON, correct file "
+                  "names); device serial log has the [char] error detail.")
+            print("[push] WARNING: char_begin already wiped /characters/, "
+                  "device has no active character until a good pack is "
+                  "pushed.")
+            return 1
+        print(f"[push] DONE — character '{name}' installed and active")
         return 0
     except (TimeoutError, KeyboardInterrupt) as e:
         print(f"[push] aborted: {e}")

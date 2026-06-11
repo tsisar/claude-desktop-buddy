@@ -112,7 +112,10 @@ class FakeBridge:
                 return
 
     def time_sync(self):
-        tz_east = -time.timezone if not time.daylight else -time.altzone
+        # tm_gmtoff is seconds EAST of UTC for the *current* moment, so DST
+        # is accounted for only when it's actually in effect (time.daylight
+        # merely means the zone HAS DST rules).
+        tz_east = time.localtime().tm_gmtoff
         self.send({"time": [int(time.time()), int(tz_east)]})
 
     def owner(self, name):

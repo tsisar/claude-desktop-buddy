@@ -31,7 +31,11 @@ def flash(src: Path) -> None:
     shutil.copytree(src, dst)
     print(f"staged {name}: {total:,} bytes -> {dst}")
 
-    subprocess.run(["pio", "run", "-t", "uploadfs"], cwd=PROJECT, check=True)
+    # PlatformIO usually isn't on PATH here — the Makefile documents that it
+    # lives in ~/.platformio/penv/bin. Fall back to PATH if it's elsewhere.
+    pio = Path.home() / ".platformio/penv/bin/pio"
+    pio_cmd = str(pio) if pio.exists() else "pio"
+    subprocess.run([pio_cmd, "run", "-t", "uploadfs"], cwd=PROJECT, check=True)
     print(f"\nflashed. on the stick: hold A -> settings -> species -> GIF")
 
 
