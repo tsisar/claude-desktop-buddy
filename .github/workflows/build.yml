@@ -1,0 +1,49 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build firmware
+        run: pio run -e ws-amoled-18
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PlatformIO
+        run: pip install platformio
+      - name: Host unit tests (src/logic)
+        run: pio test -e native
+
+  host-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax-check host tools
+        run: python -m compileall tools/

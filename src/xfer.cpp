@@ -10,6 +10,8 @@
 #include "buddy.h"
 #include "debug.h"
 #include "screenshot.h"
+#include "version.h"
+#include "logic/sanitize.h"
 
 // AMOLED port of the transfer handler. Differences from M5:
 //   • LittleFS replaced by hal/storage.h — files go onto SD if a card is
@@ -96,24 +98,9 @@ static void _xAck(const char* what, bool ok, uint32_t n = 0) {
   _xReply(b, len);
 }
 
-// Accept only a plain single-path-segment name from the (untrusted) BLE/USB
-// peer: [A-Za-z0-9._-], non-empty, not "." / "..", short enough to fit our
-// fixed path buffers. Blocks path traversal ("../etc"), absolute paths and
-// separators — without this, `name`/`path` flow straight into snprintf'd
-// filesystem paths. Char packs are flat (no subdirs), so one segment is enough.
-static bool _xSafeName(const char* s, size_t maxLen) {
-  if (!s || !*s) return false;
-  size_t n = 0;
-  for (const char* c = s; *c; c++, n++) {
-    char ch = *c;
-    bool ok = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
-              (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-';
-    if (!ok) return false;
-  }
-  if (n >= maxLen) return false;
-  if (strcmp(s, ".") == 0 || strcmp(s, "..") == 0) return false;
-  return true;
-}
+// Path-segment validation moved to logic/sanitize.h (buddySafeName) so the
+// host test suite covers the traversal/charset edges — it is the only
+// thing standing between wire-supplied names and snprintf'd FS paths.
 
 // Remove a directory's contents (one level deep — char packs don't nest).
 // One removal per directory open: deleting entries while iterating the
@@ -261,6 +248,7 @@ bool xferCommand(JsonDocument& doc) {
     char b[400];
     int len = snprintf(b, sizeof(b),
       "{\"ack\":\"status\",\"ok\":true,\"n\":0,\"data\":{"
+      "\"fw\":\"" BUDDY_FW_VERSION "\","
       "\"name\":\"%s\",\"owner\":\"%s\",\"sec\":%s,"
       "\"bat\":{\"pct\":%d,\"mV\":%d,\"mA\":0,\"usb\":%s},"
       "\"sys\":{\"up\":%lu,\"heap\":%u,\"fsFree\":%llu,\"fsTotal\":%llu},"
@@ -287,7 +275,7 @@ bool xferCommand(JsonDocument& doc) {
 
     // Validate the pack name BEFORE wiping anything — a bad/hostile name must
     // not cost the currently-installed pack or escape /characters/.
-    if (!_xSafeName(name, sizeof(_xCharName))) {
+    if (!buddySafeName(name, sizeof(_xCharName))) {
       _xAck("char_begin", false);
       return true;
     }
@@ -361,7 +349,7 @@ bool xferCommand(JsonDocument& doc) {
     if (!path) { _xAck("file", false); return true; }
     // Same single-segment guard as the pack name: no "..", no separators, so
     // the file can't escape this pack's directory.
-    if (!_xSafeName(path, 64)) { _xAck("file", false); return true; }
+    if (!buddySafeName(path, 64)) { _xAck("file", false); return true; }
     char full[96];
     snprintf(full, sizeof(full), "/characters/%s/%s", _xCharName, path);
     _xFile = storageFS().open(full, "w");

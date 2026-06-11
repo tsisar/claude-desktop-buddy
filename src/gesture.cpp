@@ -1,5 +1,6 @@
 #include "gesture.h"
 #include "hal/touch.h"
+#include "logic/classify.h"
 #include <Arduino.h>
 #include <stdlib.h>
 
@@ -43,17 +44,9 @@ void gestureUpdate() {
     int16_t  dy   = (int16_t)gLastY - (int16_t)gStartY;
     uint16_t dtMs = (uint16_t)min<uint32_t>(millis() - gStartT, 65535u);
 
-    GestureEvent ev = { GESTURE_NONE, gStartX, gStartY, dx, dy, dtMs };
-    int adx = abs(dx), ady = abs(dy);
-
-    if (adx < GESTURE_TAP_R && ady < GESTURE_TAP_R && dtMs < GESTURE_TAP_MS) {
-      ev.kind = GESTURE_TAP;
-    } else if (adx >= GESTURE_SWIPE_T && adx > ady) {
-      ev.kind = (dx > 0) ? GESTURE_SWIPE_RIGHT : GESTURE_SWIPE_LEFT;
-    } else if (ady >= GESTURE_SWIPE_T && ady > adx) {
-      ev.kind = (dy > 0) ? GESTURE_SWIPE_DOWN : GESTURE_SWIPE_UP;
-    }
-    // else: ambiguous slow move — drop it.
+    // Classification lives in logic/classify.h so the host test suite
+    // covers the approve-vs-deny decision edges.
+    GestureEvent ev = { classifyGesture(dx, dy, dtMs), gStartX, gStartY, dx, dy, dtMs };
 
     // Don't overwrite an unread pending event with NONE; otherwise the new
     // event always wins (a real gesture overrides a stale GESTURE_NONE).

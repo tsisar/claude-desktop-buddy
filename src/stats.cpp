@@ -1,4 +1,5 @@
 #include "stats.h"
+#include "logic/token_ledger.h"
 #include <Arduino.h>
 #include <Preferences.h>
 #include <string.h>
@@ -60,28 +61,13 @@ void statsOnApproval(uint32_t secondsToRespond) {
 }
 
 // Tokens feed the pet. 50K per level, 5K per pip on the fed bar.
-// Bridge sends cumulative since its start; we add the delta. A drop means
-// the bridge restarted — resync without adding, don't lose NVS progress.
-static uint32_t _lastBridgeTokens = 0;
-static bool _tokensSynced = false;       // first-sight latch — see below
+// The first-sight latch / bridge-restart resync lives in
+// logic/token_ledger.h so the host test suite covers it.
+static TokenLedger _ledger;
 static bool _levelUpPending = false;
 
 void statsOnBridgeTokens(uint32_t bridgeTotal) {
-  // The bridge sends its cumulative total since IT started. We track deltas.
-  // Bridge restart → number drops → resync. But on DEVICE reboot,
-  // _lastBridgeTokens is back to 0 while the bridge's total isn't — first
-  // packet would re-credit the entire session. Latch on first sight instead.
-  if (!_tokensSynced) {
-    _lastBridgeTokens = bridgeTotal;
-    _tokensSynced = true;
-    return;
-  }
-  if (bridgeTotal < _lastBridgeTokens) {
-    _lastBridgeTokens = bridgeTotal;     // bridge restarted
-    return;
-  }
-  uint32_t delta = bridgeTotal - _lastBridgeTokens;
-  _lastBridgeTokens = bridgeTotal;
+  uint32_t delta = _ledger.feed(bridgeTotal);
   if (delta == 0) return;
 
   uint8_t lvlBefore = (uint8_t)(_stats.tokens / TOKENS_PER_LEVEL);
