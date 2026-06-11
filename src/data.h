@@ -95,6 +95,10 @@ bool xferCommand(JsonDocument& doc);
 // acks return on the same channel (USB → Serial, BLE → NUS).
 void xferSetSource(bool fromUsb);
 
+// Abort a mid-flight character transfer — called below when the liveness
+// window expires so a dead host can't pin the progress screen forever.
+void xferAbort();
+
 // Sanitise incoming text into the built-in 6x8 font's character set: strip
 // control bytes, pass ASCII through, romanise Cyrillic via _cyrillicTranslit,
 // map a few common punctuation marks, and fall back to '?' for anything else
@@ -200,7 +204,20 @@ static void _applyJson(const char* line, TamaState* out) {
   // adjusted epoch yields local components including weekday.
   JsonArray t = doc["time"];
   if (!t.isNull() && t.size() == 2) {
-    time_t local = (time_t)t[0].as<uint32_t>() + (int32_t)t[1];
+    uint32_t epoch = t[0].as<uint32_t>();
+    int32_t  tz    = t[1];
+    // Sanity-gate before touching the RTC: a buggy bridge sending
+    // {"time":[0,0]} or a garbage tz offset must not set the clock to 1970
+    // and latch _rtcValid. Mirrors the >=2024 guard on the boot-restore
+    // path in main.cpp. A rejected sync still proves the bridge is alive.
+    if (epoch < 1704067200UL /* 2024-01-01 UTC */ ||
+        tz < -14 * 3600 || tz > 14 * 3600) {
+      Serial.printf("[data] time sync rejected: epoch=%lu tz=%ld\n",
+                    (unsigned long)epoch, (long)tz);
+      _lastLiveMs = millis();
+      return;
+    }
+    time_t local = (time_t)epoch + tz;
     struct tm lt; gmtime_r(&local, &lt);
     RtcTime tm = { (uint8_t)lt.tm_hour, (uint8_t)lt.tm_min, (uint8_t)lt.tm_sec };
     RtcDate dt = { (uint16_t)(lt.tm_year + 1900), (uint8_t)(lt.tm_mon + 1),
@@ -244,23 +261,38 @@ static void _applyJson(const char* line, TamaState* out) {
   _lastLiveMs = millis();
 }
 
+// A line longer than the buffer used to be silently truncated at N-1 and
+// parsed as broken JSON — a heartbeat carrying a full 16-entry transcript
+// can exceed 1 KB, so a verbose desktop session rendered every heartbeat
+// undecodable. Now: 4 KB buffers (matches the 4 KB Serial RX ring set in
+// setup() and the desktop-side 4 KB turn-event cap), and an explicit
+// overflow flag so an over-long line is consumed to its newline and
+// dropped ONCE with a log line, instead of fusing into parse noise.
 template<size_t N>
 struct _LineBuf {
   char buf[N];
   uint16_t len = 0;
+  bool overflow = false;
   void feed(Stream& s, TamaState* out) {
     while (s.available()) {
       char c = s.read();
       if (c == '\n' || c == '\r') {
-        if (len > 0) { buf[len]=0; if (buf[0]=='{') _applyJson(buf, out); len=0; }
+        if (overflow) {
+          Serial.printf("[data] line overflow >%uB, dropped\n", (unsigned)(N - 1));
+          overflow = false; len = 0;
+        } else if (len > 0) {
+          buf[len]=0; if (buf[0]=='{') _applyJson(buf, out); len=0;
+        }
       } else if (len < N-1) {
         buf[len++] = c;
+      } else {
+        overflow = true;   // keep consuming to the newline, then drop
       }
     }
   }
 };
 
-static _LineBuf<1024> _usbLine, _btLine;
+static _LineBuf<4096> _usbLine, _btLine;
 
 inline void dataPoll(TamaState* out) {
   uint32_t now = millis();
@@ -279,25 +311,50 @@ inline void dataPoll(TamaState* out) {
   _usbLine.feed(Serial, out);
   xferSetSource(false);                // and these over BLE
   // BLE ring buffer is drained manually since it's not a Stream.
+  static bool _btDiscard = false;      // resync: drop bytes until next newline
   while (bleAvailable()) {
+    if (bleRxOverflowTake()) {
+      // The BLE RX ring dropped bytes while the loop was blocked: whatever
+      // is buffered is a truncated fragment that would fuse with the next
+      // write into one garbled line (and a lost ack hangs the ack-paced
+      // host). Reset and resync on a clean line boundary.
+      Serial.printf("[data] ble rx overflow, %lu B dropped total\n",
+                    (unsigned long)bleRxDropped());
+      _btLine.len = 0;
+      _btLine.overflow = false;
+      _btDiscard = true;
+    }
     int c = bleRead();
     if (c < 0) break;
     _lastBtByteMs = millis();
     if (c == '\n' || c == '\r') {
-      if (_btLine.len > 0) {
+      if (_btDiscard) {
+        _btDiscard = false; _btLine.len = 0;
+      } else if (_btLine.overflow) {
+        Serial.println("[data] ble line overflow, dropped");
+        _btLine.overflow = false; _btLine.len = 0;
+      } else if (_btLine.len > 0) {
         _btLine.buf[_btLine.len] = 0;
         if (_btLine.buf[0] == '{') _applyJson(_btLine.buf, out);
         _btLine.len = 0;
       }
     } else if (_btLine.len < sizeof(_btLine.buf) - 1) {
       _btLine.buf[_btLine.len++] = (char)c;
+    } else {
+      _btLine.overflow = true;
     }
   }
 
   out->connected = dataConnected();
   if (!out->connected) {
+    xferAbort();   // no-op unless a transfer was open when the link died
     out->sessionsTotal=0; out->sessionsRunning=0; out->sessionsWaiting=0;
     out->recentlyCompleted=false; out->lastUpdated=now;
+    // Drop any pending prompt with the link: the host that asked is gone.
+    // Leaving promptId set pinned the approval screen forever, blocked auto
+    // screen-off and nap detection, and let a swipe answer a prompt the
+    // host had already abandoned.
+    out->promptId[0]=0; out->promptTool[0]=0; out->promptHint[0]=0;
     strncpy(out->msg, "No Claude connected", sizeof(out->msg)-1);
     out->msg[sizeof(out->msg)-1]=0;
   }

@@ -25,7 +25,11 @@
 #define NUS_RX_UUID      "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 #define NUS_TX_UUID      "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
-static const size_t RX_CAP = 2048;
+// 8 KB: the main loop has blocking windows of hundreds of ms (screenshot
+// SD write, touch-bus recovery) during which a connected host keeps
+// notifying ~500 B per connection event at MTU 517 — the old 2 KB ring
+// overflowed after ~4 events and silently truncated a JSON line mid-flight.
+static const size_t RX_CAP = 8192;
 static uint8_t  rxBuf[RX_CAP];
 static volatile size_t rxHead = 0, rxTail = 0;
 // rxHead is advanced by the NimBLE host task (onWrite callback); rxTail by the
@@ -43,16 +47,32 @@ static volatile bool      secure = false;
 static volatile uint32_t  passkey = 0;
 static volatile uint16_t  mtu = 23;
 
+// Ring-full is not silent any more: the flag + counter let the drain loop
+// in data.h resync on a line boundary and log how much was lost, instead
+// of fusing the truncated tail with the next write into one garbled line.
+static volatile bool     rxOverflow = false;
+static volatile uint32_t rxDropped  = 0;
+
 static void rxPush(const uint8_t* p, size_t n) {
   portENTER_CRITICAL(&rxMux);
-  for (size_t i = 0; i < n; i++) {
+  size_t i = 0;
+  for (; i < n; i++) {
     size_t next = (rxHead + 1) % RX_CAP;
     if (next == rxTail) break;   // full — drop the rest
     rxBuf[rxHead] = p[i];
     rxHead = next;
   }
+  if (i < n) { rxOverflow = true; rxDropped += (uint32_t)(n - i); }
   portEXIT_CRITICAL(&rxMux);
 }
+
+bool bleRxOverflowTake() {
+  bool v = rxOverflow;
+  if (v) rxOverflow = false;
+  return v;
+}
+
+uint32_t bleRxDropped() { return rxDropped; }
 
 class RxCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* c, ble_gap_conn_desc*) override {
@@ -68,6 +88,11 @@ class ServerCallbacks : public BLEServerCallbacks {
   }
   void onDisconnect(BLEServer*) override {
     connected = false; secure = false; passkey = 0; mtu = 23;
+    // Terminate any partial line so a stale fragment from this connection
+    // can't fuse with the first write of the next one — the parser drops
+    // the terminated fragment visibly (json err) instead.
+    static const uint8_t nl = '\n';
+    rxPush(&nl, 1);
     Serial.println("[ble] disconnected");
     BLEDevice::startAdvertising();
   }

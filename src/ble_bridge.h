@@ -30,3 +30,9 @@ void bleClearBonds();
 size_t bleAvailable();
 int bleRead();
 size_t bleWrite(const uint8_t* data, size_t len);
+// True (once, read-and-clear) if the RX ring overflowed since the last
+// call — the drain loop uses it to resync on a line boundary instead of
+// parsing a silently-truncated JSON line.
+bool bleRxOverflowTake();
+// Cumulative count of RX bytes dropped to ring overflow, for logging.
+uint32_t bleRxDropped();

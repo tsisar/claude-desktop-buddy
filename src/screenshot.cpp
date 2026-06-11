@@ -76,6 +76,11 @@ bool screenshotSave(char* pathOut, size_t pathLen) {
     }
     if (f.write(row, rowBytes) != rowBytes) {
       f.close(); free(row);
+      // Don't leave the truncated BMP behind: each stub is ~0.5 MB, the
+      // next probe would skip past it (stranding it forever), and on the
+      // 3.5 MB LittleFS fallback a handful of failed shots fills the
+      // partition shared with the character pack.
+      fs.remove(path);
       Serial.printf("[shot] write failed %s\n", path);
       return false;
     }

@@ -309,9 +309,20 @@ static void clickSoft(uint16_t freq) {
   audioClickSoft(freq);
 }
 
+// Send a device-originated command (permission decisions) to the host.
+// The prompt can arrive over USB or BLE, so the reply goes out on BOTH
+// channels unconditionally — routing the Serial side through the verbose-
+// only log macro silently dropped every USB reply in normal builds (same
+// bug class xfer.h's _xReply already fixed for acks). The TX-timeout
+// bracket mirrors _xReply: boot sets setTxTimeoutMs(0) so stray logs never
+// block with no host attached, but a protocol reply must not be dropped
+// on a full TX ring.
 static void sendCmd(const char* json) {
-  VLOGLN(json);
   size_t n = strlen(json);
+  Serial.setTxTimeoutMs(50);
+  Serial.write((const uint8_t*)json, n);
+  Serial.write((const uint8_t*)"\n", 1);
+  Serial.setTxTimeoutMs(0);
   bleWrite((const uint8_t*)json, n);
   bleWrite((const uint8_t*)"\n", 1);
 }
@@ -1406,6 +1417,9 @@ static void doConfirm(int decision) {
     p.clear();
     p.end();
     bleClearBonds();
+    // Deliberate restart — clear the hang breadcrumb so the next boot
+    // doesn't log a false "[hang] warm reset" (same as the reboot menu).
+    bcMagic = 0;
     delay(300);
     ESP.restart();   // does not return
   }
@@ -1851,8 +1865,8 @@ void loop() {
         decisionFlashSide = -1; decisionFlashUntil = now + 600; mockDeny();
       }
     } else if (displayMode == DISP_NORMAL) {
-      // Up/down cycle the home views (down = forward, up = back). Menu now
-      // opens on BOOT long only.
+      // Up/down cycle the home views (down = forward, up = back). The menu
+      // opens on BOOT short (see the button block above).
       if      (ev.kind == GESTURE_SWIPE_DOWN) {
         displayMode = DISP_PET; petPage = 0; clickSoft(700);
       } else if (ev.kind == GESTURE_SWIPE_UP) {
