@@ -88,10 +88,7 @@ static void doBusy(uint32_t t) {
   uint8_t beat = (t / 5) % sizeof(SEQ);
   buddyPrintSprite(P[SEQ[beat]], 5, 0, 0x07F0);
 
-  static const char* const DOTS[] = { ".  ", ".. ", "...", " ..", "  .", "   " };
-  buddySetColor(BUDDY_WHITE);
-  buddySetCursor(BUDDY_X_CENTER + 22, BUDDY_Y_OVERLAY + 14);
-  buddyPrint(DOTS[t % 6]);
+  overlayDots(t);
 
   // tiny bubble rising inside the slime
   int b = (t / 2) % 8;
@@ -145,10 +142,9 @@ static void doCelebrate(uint32_t t) {
   static const char* const POSE[5]    = { "    \\__/    ", "   .----.   ", "  ( *  * )  ", " /(  WW  )\\ ", "  `------`  " };
 
   const char* const* P[6] = { SQUASH, LAUNCH, AIRBORNE, SPLAT_L, SPLAT_R, POSE };
-  static const uint8_t SEQ[] = { 0,1,2,1,0, 3,4,3,4, 0,1,2,1,0, 5,5 };
   static const int8_t Y_SHIFT[] = { 0,-2,-7,-2,0, 0,0,0,0, 0,-2,-7,-2,0, 0,0 };
-  uint8_t beat = (t / 3) % sizeof(SEQ);
-  buddyPrintSprite(P[SEQ[beat]], 5, Y_SHIFT[beat], 0x07F0);
+  uint8_t beat = (t / 3) % sizeof(BUDDY_CELEB_SEQ);
+  buddyPrintSprite(P[BUDDY_CELEB_SEQ[beat]], 5, Y_SHIFT[beat], 0x07F0);
 
   static const uint16_t cols[] = { BUDDY_YEL, BUDDY_HEART, BUDDY_CYAN, 0x07F0, BUDDY_GREEN };
   for (int i = 0; i < 6; i++) {
@@ -173,10 +169,8 @@ static void doDizzy(uint32_t t) {
   static const char* const SPLAT[5]   = { "            ", "            ", " .---------.", "( @      @ )", " `--._.--._`" };
 
   const char* const* P[5] = { LEAN_L, LEAN_R, WOBBLE, WOBBLE2, SPLAT };
-  static const uint8_t SEQ[] = { 0,1,0,1, 2,3, 0,1,0,1, 4,4, 2,3 };
-  static const int8_t X_SHIFT[] = { -3,3,-3,3, 0,0, -3,3,-3,3, 0,0, 0,0 };
-  uint8_t beat = (t / 4) % sizeof(SEQ);
-  buddyPrintSprite(P[SEQ[beat]], 5, 0, 0x07F0, X_SHIFT[beat]);
+  uint8_t beat = (t / 4) % sizeof(BUDDY_DIZZY_SEQ);
+  buddyPrintSprite(P[BUDDY_DIZZY_SEQ[beat]], 5, 0, 0x07F0, BUDDY_DIZZY_XSHIFT[beat]);
 
   static const int8_t OX[] = { 0, 5, 7, 5, 0, -5, -7, -5 };
   static const int8_t OY[] = { -5, -3, 0, 3, 5, 3, 0, -3 };
@@ -210,15 +204,7 @@ static void doHeart(uint32_t t) {
   uint8_t beat = (t / 5) % sizeof(SEQ);
   buddyPrintSprite(P[SEQ[beat]], 5, Y_BOB[beat], 0x07F0);
 
-  buddySetColor(BUDDY_HEART);
-  for (int i = 0; i < 5; i++) {
-    int phase = (t + i * 4) % 16;
-    int y = BUDDY_Y_OVERLAY + 16 - phase;
-    if (y < -2 || y > BUDDY_Y_BASE) continue;
-    int x = BUDDY_X_CENTER - 20 + i * 8 + ((phase / 3) & 1) * 2 - 1;
-    buddySetCursor(x, y);
-    buddyPrint("v");
-  }
+  overlayHearts(t);
 }
 
 }  // namespace blob

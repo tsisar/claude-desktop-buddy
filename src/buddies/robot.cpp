@@ -142,10 +142,8 @@ static void doCelebrate(uint32_t t) {
   static const char* const POSE[5]    = { "    [**]    ", "   .[||].   ", "  [ ^    ^ ]", " /[ #### ]\\ ", "  `------'  " };
 
   const char* const* P[6] = { CROUCH, JUMP, PEAK, SPIN_L, SPIN_R, POSE };
-  static const uint8_t SEQ[] = { 0,1,2,1,0, 3,4,3,4, 0,1,2,1,0, 5,5 };
-  static const int8_t Y_SHIFT[] = { 0,-3,-6,-3,0, 0,0,0,0, 0,-3,-6,-3,0, 0,0 };
-  uint8_t beat = (t / 3) % sizeof(SEQ);
-  buddyPrintSprite(P[SEQ[beat]], 5, Y_SHIFT[beat], 0xC618);
+  uint8_t beat = (t / 3) % sizeof(BUDDY_CELEB_SEQ);
+  buddyPrintSprite(P[BUDDY_CELEB_SEQ[beat]], 5, BUDDY_CELEB_YSHIFT[beat], 0xC618);
 
   // Sparks and bolts shooting out
   static const uint16_t cols[] = { BUDDY_YEL, BUDDY_CYAN, BUDDY_GREEN, BUDDY_WHITE, BUDDY_PURPLE };
@@ -169,10 +167,8 @@ static void doDizzy(uint32_t t) {
   static const char* const CRASH[5]   = { "            ", "   .[??].   ", "  [ x    x ]", "  [ ____ ]  ", " /`-_--_-'\\ " };
 
   const char* const* P[5] = { TILT_L, TILT_R, GLITCH, GLITCH2, CRASH };
-  static const uint8_t SEQ[] = { 0,1,0,1, 2,3, 0,1,0,1, 4,4, 2,3 };
-  static const int8_t X_SHIFT[] = { -3,3,-3,3, 0,0, -3,3,-3,3, 0,0, 0,0 };
-  uint8_t beat = (t / 4) % sizeof(SEQ);
-  buddyPrintSprite(P[SEQ[beat]], 5, 0, 0xC618, X_SHIFT[beat]);
+  uint8_t beat = (t / 4) % sizeof(BUDDY_DIZZY_SEQ);
+  buddyPrintSprite(P[BUDDY_DIZZY_SEQ[beat]], 5, 0, 0xC618, BUDDY_DIZZY_XSHIFT[beat]);
 
   // Orbiting error symbols
   static const int8_t OX[] = { 0, 5, 7, 5, 0, -5, -7, -5 };
@@ -203,15 +199,7 @@ static void doHeart(uint32_t t) {
   uint8_t beat = (t / 5) % sizeof(SEQ);
   buddyPrintSprite(P[SEQ[beat]], 5, Y_BOB[beat], 0xC618);
 
-  buddySetColor(BUDDY_HEART);
-  for (int i = 0; i < 5; i++) {
-    int phase = (t + i * 4) % 16;
-    int y = BUDDY_Y_OVERLAY + 16 - phase;
-    if (y < -2 || y > BUDDY_Y_BASE) continue;
-    int x = BUDDY_X_CENTER - 20 + i * 8 + ((phase / 3) & 1) * 2 - 1;
-    buddySetCursor(x, y);
-    buddyPrint("v");
-  }
+  overlayHearts(t);
 }
 
 }  // namespace robot

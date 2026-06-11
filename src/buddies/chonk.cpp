@@ -143,10 +143,9 @@ static void doCelebrate(uint32_t t) {
   static const char* const POSE[5]    = { "    \\__/    ", "  /\\____/\\  ", " ( ^    ^ ) ", "/(   WW   )\\", "  `------'  " };
 
   const char* const* P[6] = { CROUCH, JUMP, PEAK, SPIN_L, SPIN_R, POSE };
-  static const uint8_t SEQ[] = { 0,1,2,1,0, 3,4,3,4, 0,1,2,1,0, 5,5 };
   static const int8_t Y_SHIFT[] = { 0,-3,-7,-3,0, 0,0,0,0, 0,-3,-7,-3,0, 0,0 };
-  uint8_t beat = (t / 3) % sizeof(SEQ);
-  buddyPrintSprite(P[SEQ[beat]], 5, Y_SHIFT[beat], 0xFD20);
+  uint8_t beat = (t / 3) % sizeof(BUDDY_CELEB_SEQ);
+  buddyPrintSprite(P[BUDDY_CELEB_SEQ[beat]], 5, Y_SHIFT[beat], 0xFD20);
 
   static const uint16_t cols[] = { BUDDY_YEL, BUDDY_HEART, BUDDY_CYAN, BUDDY_WHITE, BUDDY_GREEN, BUDDY_PURPLE };
   for (int i = 0; i < 7; i++) {
@@ -169,10 +168,9 @@ static void doDizzy(uint32_t t) {
   static const char* const TUMBLE[5]  = { "            ", "  /\\____/\\  ", " ( @    @ ) ", "(    --    )", " /`-_---_'\\ " };
 
   const char* const* P[5] = { TILT_L, TILT_R, WOOZY, WOOZY2, TUMBLE };
-  static const uint8_t SEQ[] = { 0,1,0,1, 2,3, 0,1,0,1, 4,4, 2,3 };
   static const int8_t X_SHIFT[] = { -4,4,-4,4, 0,0, -4,4,-4,4, 0,0, 0,0 };
-  uint8_t beat = (t / 4) % sizeof(SEQ);
-  buddyPrintSprite(P[SEQ[beat]], 5, 0, 0xFD20, X_SHIFT[beat]);
+  uint8_t beat = (t / 4) % sizeof(BUDDY_DIZZY_SEQ);
+  buddyPrintSprite(P[BUDDY_DIZZY_SEQ[beat]], 5, 0, 0xFD20, X_SHIFT[beat]);
 
   // Stars orbiting in a wider ellipse around the chonk's head
   static const int8_t OX[] = { 0, 6, 9, 6, 0, -6, -9, -6 };

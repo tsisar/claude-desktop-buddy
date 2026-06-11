@@ -82,10 +82,7 @@ static void doBusy(uint32_t t) {
   uint8_t beat = (t / 5) % sizeof(SEQ);
   buddyPrintSprite(P[SEQ[beat]], 5, 0, 0xC2A6);
 
-  static const char* const DOTS[] = { ".  ", ".. ", "...", " ..", "  .", "   " };
-  buddySetColor(BUDDY_WHITE);
-  buddySetCursor(BUDDY_X_CENTER + 22, BUDDY_Y_OVERLAY + 14);
-  buddyPrint(DOTS[t % 6]);
+  overlayDots(t);
 }
 
 // ─── ATTENTION ───  ~8s cycle, 6 poses + ! pulse
@@ -106,16 +103,7 @@ static void doAttention(uint32_t t) {
   int xOff = (pose == 4) ? ((t & 1) ? 1 : -1) : 0;
   buddyPrintSprite(P[pose], 5, 0, 0xC2A6, xOff);
 
-  if ((t / 2) & 1) {
-    buddySetColor(BUDDY_YEL);
-    buddySetCursor(BUDDY_X_CENTER - 4, BUDDY_Y_OVERLAY);
-    buddyPrint("!");
-  }
-  if ((t / 3) & 1) {
-    buddySetColor(BUDDY_YEL);
-    buddySetCursor(BUDDY_X_CENTER + 4, BUDDY_Y_OVERLAY + 4);
-    buddyPrint("!");
-  }
+  overlayBang(t);
 }
 
 // ─── CELEBRATE ───  ~5.6s cycle, 6 poses + confetti rain
@@ -128,21 +116,10 @@ static void doCelebrate(uint32_t t) {
   static const char* const POSE[5]    = { "    \\__/    ", "  n______n  ", " ( ^    ^ ) ", "/(   WW   )\\", "  `------'  " };
 
   const char* const* P[6] = { CROUCH, JUMP, PEAK, SPIN_L, SPIN_R, POSE };
-  static const uint8_t SEQ[] = { 0,1,2,1,0, 3,4,3,4, 0,1,2,1,0, 5,5 };
-  static const int8_t Y_SHIFT[] = { 0,-3,-6,-3,0, 0,0,0,0, 0,-3,-6,-3,0, 0,0 };
-  uint8_t beat = (t / 3) % sizeof(SEQ);
-  buddyPrintSprite(P[SEQ[beat]], 5, Y_SHIFT[beat], 0xC2A6);
+  uint8_t beat = (t / 3) % sizeof(BUDDY_CELEB_SEQ);
+  buddyPrintSprite(P[BUDDY_CELEB_SEQ[beat]], 5, BUDDY_CELEB_YSHIFT[beat], 0xC2A6);
 
-  static const uint16_t cols[] = { BUDDY_YEL, BUDDY_HEART, BUDDY_CYAN, BUDDY_WHITE, BUDDY_GREEN };
-  for (int i = 0; i < 6; i++) {
-    int phase = (t * 2 + i * 11) % 22;
-    int x = BUDDY_X_CENTER - 36 + i * 14;
-    int y = BUDDY_Y_OVERLAY - 6 + phase;
-    if (y > BUDDY_Y_BASE + 20 || y < 0) continue;
-    buddySetColor(cols[i % 5]);
-    buddySetCursor(x, y);
-    buddyPrint((i + (int)(t/2)) & 1 ? "*" : ".");
-  }
+  overlayConfetti(t);
 }
 
 // ─── DIZZY ───  ~5.6s cycle, 5 poses + orbiting stars
@@ -154,21 +131,10 @@ static void doDizzy(uint32_t t) {
   static const char* const STUMBLE[5] = { "            ", "  n______n  ", " ( @    @ ) ", " (   --   ) ", " /`-_---_'\\ " };
 
   const char* const* P[5] = { TILT_L, TILT_R, WOOZY, WOOZY2, STUMBLE };
-  static const uint8_t SEQ[] = { 0,1,0,1, 2,3, 0,1,0,1, 4,4, 2,3 };
-  static const int8_t X_SHIFT[] = { -3,3,-3,3, 0,0, -3,3,-3,3, 0,0, 0,0 };
-  uint8_t beat = (t / 4) % sizeof(SEQ);
-  buddyPrintSprite(P[SEQ[beat]], 5, 0, 0xC2A6, X_SHIFT[beat]);
+  uint8_t beat = (t / 4) % sizeof(BUDDY_DIZZY_SEQ);
+  buddyPrintSprite(P[BUDDY_DIZZY_SEQ[beat]], 5, 0, 0xC2A6, BUDDY_DIZZY_XSHIFT[beat]);
 
-  static const int8_t OX[] = { 0, 5, 7, 5, 0, -5, -7, -5 };
-  static const int8_t OY[] = { -5, -3, 0, 3, 5, 3, 0, -3 };
-  uint8_t p1 = t % 8;
-  uint8_t p2 = (t + 4) % 8;
-  buddySetColor(BUDDY_CYAN);
-  buddySetCursor(BUDDY_X_CENTER + OX[p1] - 2, BUDDY_Y_OVERLAY + 6 + OY[p1]);
-  buddyPrint("*");
-  buddySetColor(BUDDY_YEL);
-  buddySetCursor(BUDDY_X_CENTER + OX[p2] - 2, BUDDY_Y_OVERLAY + 6 + OY[p2]);
-  buddyPrint("*");
+  overlayOrbitStars(t);
 }
 
 // ─── HEART ───  ~10s cycle, 5 poses + rising heart stream
@@ -187,15 +153,7 @@ static void doHeart(uint32_t t) {
   uint8_t beat = (t / 5) % sizeof(SEQ);
   buddyPrintSprite(P[SEQ[beat]], 5, Y_BOB[beat], 0xC2A6);
 
-  buddySetColor(BUDDY_HEART);
-  for (int i = 0; i < 5; i++) {
-    int phase = (t + i * 4) % 16;
-    int y = BUDDY_Y_OVERLAY + 16 - phase;
-    if (y < -2 || y > BUDDY_Y_BASE) continue;
-    int x = BUDDY_X_CENTER - 20 + i * 8 + ((phase / 3) & 1) * 2 - 1;
-    buddySetCursor(x, y);
-    buddyPrint("v");
-  }
+  overlayHearts(t);
 }
 
 }  // namespace capybara

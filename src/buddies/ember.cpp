@@ -167,10 +167,7 @@ static void doBusy(uint32_t t) {
   flame(t, -1, -12);
 
   // Output ticking across the laptop screen.
-  static const char* const DOTS[] = { ".  ", ".. ", "...", " ..", "  .", "   " };
-  buddySetColor(BUDDY_WHITE);
-  buddySetCursor(BUDDY_X_CENTER + 24, BUDDY_Y_OVERLAY + 12);
-  buddyPrint(DOTS[t % 6]);
+  overlayDots(t, 24, 12);
 }
 
 // ─── ATTENTION ───  startled: hands up, eyes darting:
@@ -282,15 +279,7 @@ static void doHeart(uint32_t t) {
   buddyPrintBlocks(NEUTRAL, 3, y, TERRA);
   buddyPrintBlocks(HUG_HEART, 2, y + 8, BUDDY_HEART, 3);   // front layer
 
-  buddySetColor(BUDDY_HEART);
-  for (int i = 0; i < 5; i++) {
-    int phase = (t + i * 4) % 16;
-    int y = BUDDY_Y_OVERLAY + 16 - phase;
-    if (y < -2 || y > BUDDY_Y_BASE) continue;
-    int x = BUDDY_X_CENTER - 20 + i * 8 + ((phase / 3) & 1) * 2 - 1;
-    buddySetCursor(x, y);
-    buddyPrint("v");
-  }
+  overlayHearts(t);
 }
 
 }  // namespace ember

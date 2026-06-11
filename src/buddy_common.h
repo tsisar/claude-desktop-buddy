@@ -41,3 +41,32 @@ void buddyPrintBlocks(const char* const* lines, uint8_t nLines, int yOffset, uin
 void buddySetCursor(int x, int y);
 void buddySetColor(uint16_t fg);
 void buddyPrint(const char* s);
+
+// ── shared overlay effects ──────────────────────────────────────────────
+// The particle overlays below appeared verbatim (modulo a couple of small
+// per-species parameters) in 13-19 of the species files. Bodies live in
+// src/buddies/overlays.cpp and are copied from the canonical (majority)
+// variant byte-for-byte, so a species that calls them with its old local
+// values renders pixel-identically. Species with genuinely bespoke
+// particle code just keep it inline.
+
+// Dizzy: two '*' orbiting an 8-point ellipse, half a cycle apart.
+void overlayOrbitStars(uint32_t t, int yOff = 6,
+                       uint16_t c1 = BUDDY_CYAN, uint16_t c2 = BUDDY_YEL);
+// Heart: 5 staggered 'v' rising with a phase wiggle.
+void overlayHearts(uint32_t t);
+// Celebrate: 6 confetti columns falling through the body; glyphs alternate
+// between `a` and `b` (most species use "*" / ".").
+void overlayConfetti(uint32_t t, const char* a = "*", const char* b = ".");
+// Busy: the 6-frame dot ticker next to the body.
+void overlayDots(uint32_t t, int x = 22, int y = 14);
+// Attention: two '!' blinking at different cadences.
+void overlayBang(uint32_t t, int x1 = -4, int x2 = 4, int y2 = 4);
+
+// Shared choreography tables — the dizzy and celebrate beat sequences are
+// identical in 18 of 19 species (the shift tables vary a little more, so
+// species with bespoke shifts keep theirs locally).
+extern const uint8_t BUDDY_DIZZY_SEQ[14];
+extern const int8_t  BUDDY_DIZZY_XSHIFT[14];
+extern const uint8_t BUDDY_CELEB_SEQ[16];
+extern const int8_t  BUDDY_CELEB_YSHIFT[16];
