@@ -6,8 +6,10 @@ via TFT_eSPI, AXP192 PMU, MPU6886 IMU, two physical buttons) to the
 over QSPI, capacitive touch, AXP2101 PMU, QMI8658 IMU, no physical A/B
 buttons).
 
-Branch: `port/ws-amoled-18`. The original M5 build is preserved unchanged
-under `[env:m5stickc-plus]`; the new board builds under `[env:ws-amoled-18]`.
+Branch: `port/ws-amoled-18`. The board builds under `[env:ws-amoled-18]`,
+which is now the **only** environment — the original `[env:m5stickc-plus]`
+section and the M5-specific sources have since been removed from
+`platformio.ini` (all of `src/` is live AMOLED code).
 
 ## Target hardware (verified facts)
 
@@ -50,9 +52,9 @@ The 368×448×16bpp full-screen canvas is ~322KB — lives in PSRAM, not in the
 | IMU                        | `M5.Imu` (MPU6886)             | `lewisxhe/SensorLib` → `SensorQMI8658`                                                                                                |
 | PMU / battery              | `M5.Axp` (AXP192)              | `lewisxhe/XPowersLib` → `XPowersAXP2101`                                                                                              |
 | RTC                        | `M5.Rtc`                       | `SensorLib` `SensorPCF85063` (or AXP2101)                                                                                             |
-| Touch                      | —                              | Direct FT3168 driver in `src/hal/touch_amoled.cpp` (5-byte register read at 0x02). Gesture layer on top in `src/gesture.cpp` (tap / swipe) |
-| GPIO expander              | —                              | XCA9554 at I²C `0x20` — pulses RESET on touch/display/etc at boot via `src/hal/expander_amoled.cpp` (called from `powerInit`)         |
-| Buzzer                     | `M5.Beep` (passive buzzer)     | No buzzer — board uses **ES8311 codec + speaker**. `src/hal/audio_amoled.cpp` + `src/audio/es8311.cpp` provide a blocking `audioBeep(freq, ms)`; verified on hardware |
+| Touch                      | —                              | Direct FT3168 driver in `src/hal/touch.cpp` (5-byte register read at 0x02). Gesture layer on top in `src/gesture.cpp` (tap / swipe) |
+| GPIO expander              | —                              | XCA9554 at I²C `0x20` — pulses RESET on touch/display/etc at boot via `src/hal/expander.cpp` (called from `powerInit`)         |
+| Buzzer                     | `M5.Beep` (passive buzzer)     | No buzzer — board uses **ES8311 codec + speaker**. `src/hal/audio.cpp` + `src/audio/es8311.cpp` provide non-blocking `audioBeep` / `audioClick` / `audioClickSoft` (a FreeRTOS task synthesizes the PCM); verified on hardware |
 
 Official Waveshare Arduino examples themselves use Arduino_GFX
 (`Arduino_ESP32QSPI` + `Arduino_SH8601` + `Arduino_Canvas`) and ship an LVGL
@@ -74,16 +76,24 @@ is wanted; the canvas stays as the pet/GIF surface.
 
 ## Input strategy (no A/B/Power buttons)
 
+> **Historical plan — superseded.** This section is the original porting
+> plan; several details drifted during implementation (the menu opens on a
+> BOOT tap, swipe up/down cycle the home views, and BOOT became the primary
+> UI button). The shipped behaviour is documented in `docs/USER-GUIDE.md` —
+> trust that over this section.
+
 The M5 build maps everything to BtnA (next screen / approve), BtnB (page /
 deny), hold-A (menu), AXP power button (screen off). On AMOLED there are no
 A/B buttons, so input moves to touch gestures + the PWRON button. Full
 mapping in `.tmp/buttons-map.md`; summary here:
 
-- **Approval screen:** **swipe left = APPROVE**, **swipe right = DENY**
+- **Approval screen:** **swipe right = APPROVE**, **swipe left = DENY**
   (no on-screen buttons — the whole canvas is the target).
-- **Menu (settings / reset / main):** **swipe up** opens; tap row =
-  select+confirm in one (no cycle); tap outside / `back` button = close.
-- **Cycle display mode** (NORMAL ↔ PET ↔ INFO): **swipe down**.
+- **Menu (settings / reset / main):** opens on a **BOOT tap** (shipped;
+  the plan's swipe-up open was dropped); tap row = select+confirm in one
+  (no cycle); tap outside / `back` button = close.
+- **Cycle display mode** (NORMAL ↔ PET ↔ INFO): **swipe down** (forward)
+  / **swipe up** (back).
 - **INFO / PET pagination**: swipe left / right.
 - **Reset confirmation**: modal dialog with `Confirm` / `Cancel` (replaces
   the M5 tap-twice arm/fire).
@@ -91,8 +101,9 @@ mapping in `.tmp/buttons-map.md`; summary here:
   transcript view with `back`.
 - **Power button (AXP2101 PWRON)**: short tap = screen off/on, hold ≥6s =
   hard power-off (chip-level, same as M5).
-- **BOOT (GPIO0)** — **reserved for the ES8311 audio path**, NOT used for
-  UI.
+- **BOOT (GPIO0)** — originally pencilled in as reserved for the ES8311
+  audio path; it shipped as the **primary UI button** instead (tap =
+  open menu / activate row, hold = screenshot — see the user guide).
 - **Shake (QMI8658)** → DIZZY one-shot, same algorithm as M5
   (delta > 0.8g, polled every 20ms).
 - **Face-down (QMI8658)** → nap mode (same debounce: enter ≥15 frames,
@@ -146,13 +157,15 @@ This replaces the `M5.BtnA/BtnB/Axp.GetBtnPress` logic in `loop()`.
       arduino-esp32 core 3.x.
     - **3i.2 — UI shell.** ✅ Home (CAT-only buddy + transcript HUD) +
       full approval screen + tap-to-scroll HUD. Approve / Deny on swipe
-      left / right. UTF-8 → '?' strip (later replaced by a real font in
+      right / left. UTF-8 → '?' strip (later replaced by a real font in
       the cyrillic font commit).
     - **3i.3 — menu + settings + reset modal.** ✅ Modal stack: main /
       settings / reset / confirm. Touch (tap row) AND physical buttons
-      (BOOT short = cursor up, PWRON short = cursor down, BOOT long =
-      select) share the same `navIdx`. Reset confirm replaces M5's
-      tap-twice arm pattern. NVS persists every settings toggle.
+      share the same `navIdx`. (The 3i.3 button roles were later
+      simplified to today's map: BOOT tap = select, PWRON tap = cursor
+      down, BOOT hold = screenshot — see `docs/USER-GUIDE.md`.) Reset
+      confirm replaces M5's tap-twice arm pattern. NVS persists every
+      settings toggle.
     - **3i.4 — INFO + PET + clock face + DISP cycling.** ✅
       DISP_NORMAL / PET / INFO cycled with swipe-down. 2 PET pages
       (stats / how-to), 6 INFO pages (ABOUT / CONTROLS / CLAUDE /
@@ -203,7 +216,8 @@ This replaces the `M5.BtnA/BtnB/Axp.GetBtnPress` logic in `loop()`.
   bump the base text size or introduce a layout scale factor.
 - `setBrightness()` is on the SH8601 panel object, not the canvas.
 - No panel reset/EN GPIO — `gfx->begin()` is enough (matches HelloWorld).
-- Buzzer: ES8311 + I²S beep, verified — see `src/hal/audio_amoled.cpp`.
+- Speaker: ES8311 + I²S clicks/beeps, verified — see `src/hal/audio.cpp`
+  (non-blocking; a FreeRTOS task synthesizes the tones).
 - Touch/IMU/RTC/PMU/expander all share **one** I²C bus (SDA=15, SCL=14).
   Init it once and hand the same `Wire` to every driver.
 - **XCA9554 GPIO expander at 0x20 holds touch/display RESET lines.** On a

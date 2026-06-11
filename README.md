@@ -17,15 +17,19 @@ wakes when sessions start, gets visibly impatient when an approval prompt is
 waiting, and lets you approve or deny right from the device.
 
 <p align="center">
-  <img src="docs/device.jpg" alt="M5StickC Plus running the buddy firmware" width="500">
+  <img src="docs/device.jpg" alt="Waveshare ESP32-S3-Touch-AMOLED-1.8 running the buddy firmware" width="500">
 </p>
 
 ## Hardware
 
-The firmware targets ESP32 with the Arduino framework. As written, it
-depends on the M5StickCPlus library for its display, IMU, and button
-drivers—so you'll need that board, or a fork that swaps those drivers for
-your own pin layout.
+The firmware targets the **Waveshare ESP32-S3-Touch-AMOLED-1.8**
+(ESP32-S3R8, 16MB flash, 8MB PSRAM) with the Arduino framework: a 368×448
+AMOLED (SH8601 over QSPI) driven through moononournation's **GFX Library
+for Arduino**, FT3168 capacitive touch, QMI8658 IMU, AXP2101 PMU, PCF85063
+RTC, ES8311 audio codec + speaker, and a microSD slot. The desktop bridge
+talks to it over BLE or USB-CDC. Library deps are pinned in
+`platformio.ini`; the board-specific drivers live under `src/hal/`, so a
+different board means swapping that layer for your own pin layout.
 
 ## Flashing
 
@@ -34,17 +38,20 @@ Install
 then:
 
 ```bash
-pio run -t upload
+make flash          # or: pio run -e ws-amoled-18 -t upload
 ```
+
+(`make build`, `make monitor`, and `make flash-monitor` are there too;
+override the serial device with `make flash PORT=...`.)
 
 If you're starting from a previously-flashed device, wipe it first:
 
 ```bash
-pio run -t erase && pio run -t upload
+make erase && make flash
 ```
 
-Once running, you can also wipe everything from the device itself: **hold A
-→ settings → reset → factory reset → tap twice**.
+Once running, you can also wipe everything from the device itself: **tap
+BOOT → settings → reset → factory reset → Confirm**.
 
 ## Pairing
 
@@ -61,31 +68,49 @@ first connect; grant it.
 
 Once paired, the bridge auto-reconnects whenever both sides are awake.
 
-If discovery isn't finding the stick:
+If discovery isn't finding the device:
 
-- Make sure it's awake (any button press)
-- Check the stick's settings menu → bluetooth is on
+- Make sure it's awake (press a button or double-tap the screen)
+- Check the INFO → BLUETOOTH page on the device (swipe up from home, then
+  swipe left to the BLUETOOTH page) for the advertising / connection state
 
 ## Controls
 
-|                         | Normal               | Pet         | Info        | Approval    |
-|-------------------------|----------------------|-------------|-------------|-------------|
-| **A** (front)           | next screen          | next screen | next screen | **approve** |
-| **B** (right)           | scroll transcript    | next page   | next page   | **deny**    |
-| **Hold A**              | menu                 | menu        | menu        | menu        |
-| **Power** (left, short) | toggle screen off    |             |             |             |
-| **Power** (left, ~6s)   | hard power off       |             |             |             |
-| **Shake**               | dizzy                |             |             | —           |
-| **Face-down**           | nap (energy refills) |             |             |             |
+The screen is a touch panel; the two physical buttons (BOOT and the
+AXP2101 power button) keep single, fixed meanings.
 
-The screen auto-powers-off after 30s of no interaction (kept on while an
-approval prompt is up). Any button press wakes it.
+|                      | Normal                  | Pet         | Info        | Approval    |
+|----------------------|-------------------------|-------------|-------------|-------------|
+| **Swipe right**      | next character          | prev page   | prev page   | **approve** |
+| **Swipe left**       | prev character          | next page   | next page   | **deny**    |
+| **Swipe down**       | pet view                | info view   | home        |             |
+| **Swipe up**         | info view               | home        | pet view    |             |
+| **Tap HUD**          | open transcript log     |             |             |             |
+| **BOOT** (short)     | menu                    | menu        | menu        | menu        |
+| **BOOT** (hold)      | screenshot to SD        | ″           | ″           | ″           |
+| **Power** (short)    | toggle screen off       | ″           | ″           |             |
+| **Power** (~6s)      | hard power off          | ″           | ″           | ″           |
+| **Shake**            | dizzy                   |             |             | —           |
+| **Face-down**        | nap (energy refills)    |             |             |             |
+
+On battery the screen powers off after 30s of no interaction (kept on
+while an approval prompt is up); on USB an idle clock face takes over
+instead. A button press or a double-tap on the panel wakes it. See
+[docs/USER-GUIDE.md](docs/USER-GUIDE.md) for the full gesture map, menus,
+and automatic behaviours.
 
 ## ASCII pets
 
-Eighteen pets, each with seven animations (sleep, idle, busy, attention,
-celebrate, dizzy, heart). Menu → "next pet" cycles them with a counter.
-Choice persists to NVS.
+```
+  ▐▛███▜▌
+ ▝▜█████▛▘
+   ▘▘ ▝▝
+```
+
+Nineteen pets, each with seven animations (sleep, idle, busy, attention,
+celebrate, dizzy, heart). Settings → "ascii pet" cycles them with a
+counter. Choice persists to NVS. On home, a swipe left / right cycles
+them too.
 
 ### Block-art drawing palette
 
@@ -113,8 +138,8 @@ Quick recipes — think of each cell as four quadrants; the *missing*
 quadrant of `▛▜▙▟` (BR, BL, TR, TL respectively) is what rounds a corner:
 
 ```
-rounded shoulders:    ▐▛███▜▌
-rounded base:        ▝▜█████▛▘
+rounded shoulders:   ▐▛████▜▌
+rounded base:        ▝▜████▛▘
 feet / toes:           ▘▘ ▝▝      single quadrants read as tiny feet
 flame tip:              ▗▟▖       quadrant + three-quadrant stack
 half-step outline:   ▗▄▄▄▄▄▄▖     eighths make soft slopes
@@ -132,8 +157,8 @@ python3 -c "print(''.join(chr(c) for c in range(0x2580, 0x25A0)))"
 
 If you want a custom GIF character instead of an ASCII buddy, drag a
 character pack folder onto the drop target in the Hardware Buddy window. The
-app streams it over BLE and the stick switches to GIF mode live. **Settings
-→ delete char** reverts to ASCII mode.
+app streams it over BLE and the device switches to GIF mode live. **Settings
+→ reset → delete char** reverts to ASCII mode.
 
 A character pack is a folder with `manifest.json` and 96px-wide GIFs:
 
@@ -167,20 +192,26 @@ State values can be a single filename or an array. Arrays rotate: each
 loop-end advances to the next GIF, useful for an idle activity carousel so
 the home screen doesn't loop one clip forever.
 
-GIFs are 96px wide; height up to ~140px stays on a 135×240 portrait screen.
-Crop tight to the character — transparent margins waste screen and shrink
-the sprite. `tools/prep_character.py` handles the resize: feed it source
+GIFs are 96px wide; they're drawn centred in the buddy area of the 368×448
+panel. Crop tight to the character — transparent margins shrink the visible
+sprite. `tools/prep_character.py` handles the resize: feed it source
 GIFs at any sizes and it produces a 96px-wide set where the character is the
 same scale in every state.
 
-The whole folder must fit under 1.8MB —
-`gifsicle --lossy=80 -O3 --colors 64` typically cuts 40–60%.
+The pack lands on the microSD card if one is inserted, otherwise on the
+internal LittleFS partition. Keep it small either way — BLE pushes at
+~3 KB/s, and `gifsicle --lossy=80 -O3 --colors 64` typically cuts 40–60%.
+State entries can also be pixel-art **SVG** files, which are far smaller
+than GIFs — see [docs/USER-GUIDE.md](docs/USER-GUIDE.md) and
+`characters/claude-svg/`.
 
-See `characters/bufo/` for a working example.
+See `characters/bufo/` for a working GIF example.
 
 If you're iterating on a character and would rather skip the BLE round-trip,
-`tools/flash_character.py characters/bufo` stages it into `data/` and runs
-`pio run -t uploadfs` directly over USB.
+`tools/usb_xfer_send.sh characters/bufo` (or `make char-usb
+CHAR=characters/bufo`) pushes the pack through the same transfer protocol
+over USB-CDC, and `tools/flash_character.py characters/bufo` stages it into
+`data/` and runs `pio run -t uploadfs` directly over USB.
 
 ## The seven states
 
@@ -189,9 +220,9 @@ If you're iterating on a character and would rather skip the BLE round-trip,
 | `sleep`     | bridge not connected        | eyes closed, slow breathing |
 | `idle`      | connected, nothing urgent   | blinking, looking around    |
 | `busy`      | sessions actively running   | sweating, working           |
-| `attention` | approval pending            | alert, **LED blinks**       |
-| `celebrate` | level up (every 50K tokens) | confetti, bouncing          |
-| `dizzy`     | you shook the stick         | spiral eyes, wobbling       |
+| `attention` | approval pending            | alert, agitated             |
+| `celebrate` | session completes; level up (every 50K tokens) | confetti, bouncing |
+| `dizzy`     | you shook the device        | spiral eyes, wobbling       |
 | `heart`     | approved in under 5s        | floating hearts             |
 
 ## Project layout
@@ -202,7 +233,8 @@ src/
   buddy.cpp      — ASCII species dispatch + render helpers
   buddies/       — one file per species, seven anim functions each
   ble_bridge.cpp — Nordic UART service, line-buffered TX/RX
-  character.cpp  — GIF decode + render
+  character.cpp  — GIF / SVG character pack decode + render
+  hal/           — board drivers: display, touch, power, audio, storage, IMU
   data.h         — wire protocol, JSON parse
   xfer.h         — folder push receiver
   stats.h        — NVS-backed stats, settings, owner, species choice

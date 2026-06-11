@@ -52,7 +52,7 @@ Everything that used to be M5's A/B buttons is touch-based now.
 | **swipe left**           | home (no prompt)| Previous pet / character                                           |
 | **swipe left**           | PET / INFO      | Next page                                                          |
 | **swipe right**          | PET / INFO      | Previous page                                                      |
-| **BOOT long-press**      | home            | Open the menu                                                      |
+| **double-tap**           | screen off      | Wake the screen (single taps and swipes are ignored while off)     |
 | **swipe up**             | any modal       | Close everything back to home                                      |
 | **swipe down**           | home            | Next view: NORMAL → PET → INFO → NORMAL                            |
 | **swipe up**             | home            | Previous view: NORMAL → INFO → PET → NORMAL                        |
@@ -67,12 +67,14 @@ Everything that used to be M5's A/B buttons is touch-based now.
 
 | Button + duration    | What it does                                                                      |
 |----------------------|-----------------------------------------------------------------------------------|
-| **BOOT short**       | In a menu: move highlight up. On home: cycle display mode (NORMAL → PET → INFO)   |
-| **BOOT short**       | On PET / INFO: next page                                                          |
-| **BOOT long** (≥600ms) | Activate the highlighted row. On home: open the menu                            |
-| **PWRON short**      | On home: toggle screen off / on. In a menu: move highlight down                   |
-| **PWRON short**      | On PET / INFO: previous page                                                      |
+| **BOOT short**       | On home: open the menu. In a menu / modal: activate the highlighted row           |
+| **BOOT long** (≥600 ms) | Save a screenshot to the SD card — works from **any** state (white flash = saved, red flash = failed) |
+| **PWRON short**      | On home: toggle screen off / on. In a menu / modal: move the highlight down (wraps) |
 | **PWRON long** (~6 s)| Hardware power-off (AXP2101 cuts the rails)                                       |
+
+Each button has exactly one meaning per context. Physical keys no longer
+cycle views or flip PET / INFO pages — that's touch-only now (see the
+gesture table above).
 
 Touch and physical buttons run in parallel — pick whichever is easier.
 The button cursor (highlighted row) lives behind a touch tap too, so
@@ -85,11 +87,15 @@ their own without you touching anything:
 
 - **Idle parking** — a single 30-second no-input timer drives both
   screen-savers, so the buddy gets the same grace period either way:
-  - **On USB:** after 30 s idle the **clock face** takes over (screen
-    stays lit). Needs no live sessions, no prompt, no menu, DISP_NORMAL,
-    and the RTC time-synced by the bridge at least once.
-  - **On battery:** after 30 s idle the **screen turns off** to save
-    power.
+  - **On USB:** after 30 s idle the **clock face** takes over and stays
+    up indefinitely (screen stays lit). Needs no live sessions, no
+    prompt, no menu, DISP_NORMAL, and the RTC time-synced by the bridge
+    at least once.
+  - **On battery:** after 30 s idle the clock face shows for another
+    60 s, then the **screen turns off** to save power.
+  - Settings → **screensaver** off skips the clock face entirely: on USB
+    the home view just stays up, on battery the screen goes straight off
+    after the 30 s.
   - Any change (gesture / button / shake / prompt arrival / Claude starts
     working / USB unplug) resets the timer and brings the buddy back.
 - **Face-down nap.** Put the device screen-down on a table for ~0.3 s
@@ -97,21 +103,26 @@ their own without you touching anything:
   the energy meter refills, the buddy wakes. Skipped while an approval
   prompt is up (you're probably reading it).
 - **Shake** the device → buddy goes DIZZY for 2 seconds.
-- **Beep** on prompt arrival (1200 Hz), approve (2400 Hz), deny (600 Hz),
-  menu cycle (1800 Hz). Mute via Settings → sound. (Audio is currently
-  silent on hardware while a codec issue gets investigated — the toggle
-  works once the codec lands.)
+- **Click feedback** through the on-board ES8311 codec + speaker (works
+  on hardware; tones are synthesized on a background task so the UI never
+  stalls). Sharp clicks mark events: prompt arrival (1.2 kHz), approve
+  (2.4 kHz), deny / cancel (600 Hz), menu open (800 Hz), highlight move
+  and BLE passkey arrival (1.8 kHz), screenshot shutter (2 kHz — a low
+  buzz instead means the save failed). Swipes and page turns play a
+  softer sine tick (700 Hz). Mute everything via Settings → sound.
 
 ## Menus
 
-**BOOT long-press** on home opens the main menu. **Swipe up** inside any menu closes it back to home.
+A short **BOOT** press on home opens the main menu. **Swipe up** inside any menu closes it back to home.
 
 | Main menu     | What it does                                              |
 |---------------|-----------------------------------------------------------|
 | settings      | Open the settings sub-menu                                |
-| turn off      | Black the screen (PWRON short or a tap wakes it back)     |
-| help / about  | (Stub — INFO pages cover these for now)                   |
-| demo          | Cycle fake scenarios — handy without a bridge connected   |
+| turn off      | Black the screen (PWRON short or a double-tap wakes it)   |
+| help          | Jump to the INFO → CONTROLS page                          |
+| about         | Jump to the INFO → ABOUT page                             |
+| demo          | Toggle fake scenarios on / off — handy without a bridge   |
+| reboot        | Clean software restart (handy for catching boot logs)     |
 | close         | Close the menu                                            |
 
 ### Settings
@@ -119,9 +130,10 @@ their own without you touching anything:
 | Setting       | Value column   | Notes                                                                  |
 |---------------|----------------|------------------------------------------------------------------------|
 | brightness    | `N/4`          | Tap to cycle 0..4 (40..230 panel brightness)                           |
-| sound         | on / off       | Beep gate                                                              |
+| sound         | on / off       | Gates all clicks / beeps                                               |
 | transcript    | on / off       | HUD on home                                                            |
 | battery       | on / off       | Show/hide the battery widget on home and clock                         |
+| screensaver   | on / off       | Idle clock face gate (see Automatic behaviours); off = plain screen-off |
 | ascii pet     | `N/M`          | Cycle through species. With a GIF pack installed, the last slot is GIF |
 | reset         | →              | Opens the reset sub-menu                                               |
 | back          | →              | Return to main menu                                                    |
@@ -135,11 +147,12 @@ their own without you touching anything:
 | back              | Return to settings                                                           |
 
 Both destructive actions open a `Cancel / Confirm` modal — tap outside
-or swipe to cancel, BOOT long on Confirm or tap it to commit.
+or swipe to cancel; tap Confirm (or highlight it with a short PWRON
+press, then a short BOOT press) to commit.
 
 ## Custom GIF characters
 
-The 18 ASCII species (capybara, cat, dragon, octopus, owl, penguin,
+The 19 ASCII species (capybara, cat, dragon, octopus, owl, penguin,
 …) are built in. You can also push a custom GIF pack from the
 Claude desktop:
 
@@ -175,7 +188,7 @@ Claude desktop:
 4. While the upload runs the device shows an `installing N/M KB`
    progress bar with `don't unplug` underneath. ~3 KB/s over BLE.
 5. When the bar finishes, the buddy switches to the GIF character.
-   Settings → "ascii pet" now cycles `species 1..18 → GIF → 1`.
+   Settings → "ascii pet" now cycles `species 1..19 → GIF → 1`.
 
 The pack lives on the device's storage (SD card if a microSD is
 inserted, otherwise the internal LittleFS partition). One pack at a
@@ -185,7 +198,7 @@ time — pushing a new one wipes the old.
 
 When Claude needs permission for a tool call:
 
-1. The screen wakes (if asleep), beeps once.
+1. The screen wakes (if asleep), clicks once.
 2. The approval view shows: **timer** (`approve? Ns`, turns red after
    10 s), **tool name** centered (auto-sized 5/4/3 depending on length),
    **wrapped hint** below, and **swipe hints** at the bottom: `<
@@ -215,7 +228,7 @@ clears the stored bond), or send `{"cmd":"unpair"}` from the bridge.
 
 | Symptom                                | Try this                                                             |
 |----------------------------------------|----------------------------------------------------------------------|
-| Screen is dark on battery              | Tap, swipe, press a button, or shake — anything wakes it             |
+| Screen is dark on battery              | Double-tap the screen or press any button (single taps / swipes are deliberately ignored while off) |
 | Touch doesn't respond after reflash    | Power-cycle. The XCA9554 expander reset pulse runs in `powerInit()`  |
 | Clock face doesn't appear              | Need: USB plugged in + no sessions + no prompt + RTC synced by bridge|
 | Buddy stuck on SLEEP forever           | Bridge isn't sending heartbeats. Check desktop is connected          |
